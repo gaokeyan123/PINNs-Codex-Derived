@@ -1,6 +1,6 @@
 # PROJECT STATE
 > **Auto-maintained by Claude.** Updated at every milestone or model logic change.  
-> Last updated: 2026-04-29 | Phase: **3 — Sampling Strategy** ✅
+> Last updated: 2026-04-29 | Phase: **4 — Loss Function Assembly** ✅
 
 ---
 
@@ -45,7 +45,7 @@ Completed sub-tasks:
 - [x] `network.py` — Fourier-encoded MLP with field + interface heads
 - [x] `equations.py` — autograd PDE residuals (R1–R7 + all BCs/ICs)
 - [x] `sampling.py` — Latin Hypercube interior, adaptive interface, boundary/IC samplers, plot_batch
-- [ ] `losses.py` — weighted composite loss
+- [x] `losses.py` — 8 named weighted terms, Phase 1 fast path, compute_loss, format_loss_line, log_to_csv
 - [ ] `train.py` — three-phase training loop
 - [ ] `postprocess.py` — plots and MATLAB comparison
 
@@ -110,6 +110,10 @@ Completed sub-tasks:
 | 2026-04-29 | Axis points use r=1e-4, not r=0 | Avoids 1/r singularity in _laplacian_cyl; safely above _R_MIN=1e-6 |
 | 2026-04-29 | sample_interface detaches r_int and re-wraps with requires_grad | Prevents stale computation graph references across training iterations |
 | 2026-04-29 | resample_interface uses advancing seed each call | Ensures fresh (x,t) pairs every resample step; same seed → reproducible |
+| 2026-04-29 | Phase 1 fast path `_compute_bc_ic_residuals` skips Laplacians | No second-order autograd in pre-train → ~10× faster per step |
+| 2026-04-29 | 15 BC/IC residuals averaged before applying `w_bc_ic` weight | Prevents large-N BC sets from dominating; each sub-term contributes equally |
+| 2026-04-29 | R7 (T_cont) averages fluid + deposit continuity, ×0.5 | Both must be satisfied symmetrically; prevents double-counting |
+| 2026-04-29 | `log_to_csv` appends rows with `write_header` flag | Single function used throughout training; header written once at iter 0 |
 
 ---
 

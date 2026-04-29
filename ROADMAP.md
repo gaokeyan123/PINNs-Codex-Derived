@@ -82,19 +82,23 @@
 
 ---
 
-## PHASE 4 — Loss Function Assembly
+## PHASE 4 — Loss Function Assembly ✅
 
 > **Goal:** Single scalar loss with all weighted residual terms.
 
-- [ ] **`losses.py`** — Composite loss
-  - `physics_loss(model, P_Ω)` → $\mathcal{L}_1 + \mathcal{L}_2 + \mathcal{L}_3 + \mathcal{L}_4 + \mathcal{L}_5$
-  - `interface_loss(model, P_Γ)` → $\mathcal{L}_6 + \mathcal{L}_7$
-  - `bc_ic_loss(model, P_wall, P_in, P_out, P_0)` → $\mathcal{L}_8$
-  - `total_loss(model, all_points, weights)` → weighted sum
-  - Individual term logging (each $\mathcal{L}_k$ returned separately for monitoring)
+- [x] **`losses.py`** — Composite loss assembler
+  - [x] `mse(residual)` — primitive `.pow(2).mean()` helper
+  - [x] `_compute_bc_ic_residuals()` — Phase 1 fast path, first-order only (no Laplacians)
+  - [x] `compute_loss_terms(residuals, weights, physics_on)` — 23 residuals → 8 named weighted scalars
+  - [x] `total_loss(terms, physics_on)` — sum; physics_on=False uses bc_ic only
+  - [x] `compute_loss(model, batch, cfg, physics_on)` → (grad-able scalar, detached log dict)
+  - [x] `format_loss_line(log, iter, physics_on)` — compact console monitor string
+  - [x] `log_to_csv(log, iter, csv_path, write_header)` — append row to CSV
+- [x] Weights: $w_{1-5}=1$, $w_{6,7}=10$, $w_8=100$
+- [x] `tests/test_losses.py` — 28 tests: mse accuracy, weight scaling linearity,
+      backward-ability, gradient flow to all params, log dict consistency, CSV output
 
-- [ ] Initial weights: $w_{1-5}=1$, $w_{6,7}=10$, $w_8=100$
-- [ ] **Milestone:** Total loss computes without NaN on random network. Log initial loss values.
+- [ ] **Milestone:** `python losses.py` — total loss computes without NaN, both phases backward without error.
 
 ---
 
