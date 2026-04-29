@@ -62,7 +62,10 @@ class LossWeights:
     energy_fluid: float = 1.0
     energy_dep: float = 1.0
     stefan: float = 10.0
-    T_continuity: float = 10.0
+    T_continuity: float = 100.0
+    rint_mono: float = 10.0
+    rint_x_mono: float = 10.0
+    rint_smooth: float = 1.0
     bc_ic: float = 100.0
 
 

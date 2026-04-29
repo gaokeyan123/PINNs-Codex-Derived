@@ -118,6 +118,7 @@
   - Early stop if total $\mathcal{L} < 10^{-4}$
 
 - [x] **Milestone:** Smoke training completes Phase 1/2/3 without NaN, resume works, and monitor plots/checkpoints are produced.
+- [ ] Stabilize reduced Pe=1, Ste=0.1 CPU training so the interface remains smooth/non-collapsed and reaches the target deposit thickness before MATLAB validation.
 
 ---
 

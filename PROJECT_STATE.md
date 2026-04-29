@@ -1,6 +1,6 @@
 # PROJECT STATE
 > **Auto-maintained by Claude.** Updated at every milestone or model logic change.  
-> Last updated: 2026-04-29 | Phase: **6 - Post-Processing & Validation Tooling** In Progress
+> Last updated: 2026-04-29 | Phase: **6 - Training Stabilization / Validation** In Progress
 
 ---
 
@@ -34,7 +34,7 @@ This project develops a PINN-based surrogate model to replace conventional CFD (
 
 ## 2. Current Phase
 
-**Phase 6 - Post-Processing & Validation Tooling**
+**Phase 6 - Training Stabilization / Validation**
 Status: In Progress
 
 Completed sub-tasks:
@@ -49,16 +49,17 @@ Completed sub-tasks:
 - [x] `train.py` - three-phase training loop, smoke mode, checkpoint/resume, CSV logging
 - [x] `postprocess.py` - dense-grid plots, residual maps, optional MATLAB interface overlay
 - [x] Smoke verification: `python train.py --smoke`, resume from `checkpoints/latest.pth`, and small-grid `postprocess.py`
+- [ ] Active fix: reduced CPU case showed a nonphysical localized interface collapse and high full-physics loss; training stabilization is underway before MATLAB validation.
 
 ---
 
 ## 3. Architecture Memory
 
-### 3.1 Network Design (v1.0)
+### 3.1 Network Design (v1.1)
 
 | Property | Value | Rationale |
 |---|---|---|
-| Input | $(r, x, t)$ — 3 scalars | Full space-time coordinates |
+| Input | $(r, x, t)$, internally scaled to $(r/r_w, x/L, t/t_{end})$ | Keeps Fourier features on comparable coordinate ranges while autograd still differentiates w.r.t. physical non-dimensional coordinates |
 | Fourier encoding | $\sigma=1.0$, 256 features | Overcomes spectral bias near interface |
 | Shared trunk | 8 × 128, tanh | Tanh preferred over ReLU for smooth second derivatives needed by PDE residuals |
 | Field head | → $(u_r, u_x, p, \Theta_f, \Theta_{dep})$ | Linear outputs except $\Theta$ use sigmoid |
@@ -79,8 +80,11 @@ Completed sub-tasks:
 | $\mathcal{L}_4$ | Fluid energy | 1 | Interior collocation |
 | $\mathcal{L}_5$ | Deposit energy | 1 | Interior collocation |
 | $\mathcal{L}_6$ | Stefan condition | 10 | Interface points $\mathcal{P}_\Gamma$ |
-| $\mathcal{L}_7$ | $T$ continuity at interface | 10 | Interface points |
-| $\mathcal{L}_8$ | All BCs + IC | 100 | Boundary/initial points |
+| $\mathcal{L}_7$ | $T$ continuity at interface | 100 | Interface points |
+| $\mathcal{L}_{r,t}$ | Monotone interface motion, penalize $\partial r_{int}/\partial t > 0$ | 10 | Interface points |
+| $\mathcal{L}_{r,x}$ | Monotone downstream interface, penalize $\partial r_{int}/\partial x > 0$ | 10 | Interface points |
+| $\mathcal{L}_{r,xx}$ | Smooth interface curvature, $\partial^2 r_{int}/\partial x^2$ | 1 | Interface points |
+| $\mathcal{L}_8$ | All BCs + IC, including inlet $r_{int}(0,t)=r_w$ | 100 | Boundary/initial points |
 
 **Collocation counts:** 20k interior, 5k interface (resampled every 500 iters), 2k per boundary, 5k IC.
 
@@ -122,6 +126,11 @@ Implementation notes:
 | 2026-04-29 | `log_to_csv` appends rows with `write_header` flag | Single function used throughout training; header written once at iter 0 |
 | 2026-04-29 | Added three-phase `train.py` with smoke mode and full resume checkpoints | Enables careful CPU verification locally while preserving 50k-iteration production defaults |
 | 2026-04-29 | Added `postprocess.py` with optional MATLAB interface overlay | PINN plots and residual maps are available before MATLAB reference export exists |
+| 2026-04-29 | Raised interface temperature-continuity weight from 10 to 100 | Reduced CPU case had high $T$-continuity loss, so the interface temperature must be treated as a harder constraint |
+| 2026-04-29 | Added inlet interface anchor, time monotonicity, downstream monotonicity, and axial smoothness losses | Iter 1600 CPU case found local interface collapse near interior x; these terms target that optimizer shortcut directly |
+| 2026-04-29 | Network v1.1 normalizes coordinates before Fourier encoding | The previous v1.0 interface saw x on $[0,5]$ but r,t on $[0,1]$, creating excess high-frequency axial oscillation |
+| 2026-04-29 | Corrected Stefan residual scaling to $\dot r_{int}=\text{Ste}\,\Delta q$ | The old form used $\text{Ste}\,\dot r_{int}=\Delta q$, making Ste=0.1 move the interface about 100x too fast |
+| 2026-04-29 | Made checkpoint write failures non-fatal and reduced best-checkpoint write frequency | OneDrive/disk pressure caused checkpoint writes to fail and interrupt training; source code should not be lost because an artifact write fails |
 
 ---
 

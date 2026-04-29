@@ -261,7 +261,9 @@ def res_stefan(out: dict,
     dTf_dr    = _grad(Theta_f,   r)   # ∂Θ_f/∂r̂   at the interface
     dTdep_dr  = _grad(Theta_dep, r)   # ∂Θ_dep/∂r̂ at the interface
 
-    residual = cfg.Ste * drint_dt - (cfg.k_ratio * dTdep_dr - dTf_dr)
+    # Correct nondimensional scaling: smaller Ste slows the front.
+    flux_jump = cfg.k_ratio * dTdep_dr - dTf_dr
+    residual = drint_dt - cfg.Ste * flux_jump
     return residual
 
 
@@ -279,6 +281,32 @@ def res_T_continuity(out: dict,
     R7a = out["Theta_f"]   - cfg.Theta_solidus
     R7b = out["Theta_dep"] - cfg.Theta_solidus
     return R7a, R7b
+
+
+def res_rint_monotonic(out: dict, t: torch.Tensor) -> torch.Tensor:
+    """Penalize interface radius growth in time.
+
+    Solidification should move the interface inward, so dr_int/dt <= 0.
+    Positive values indicate local melting or an optimizer shortcut.
+    """
+    drint_dt = _grad(out["r_int"], t)
+    return torch.relu(drint_dt)
+
+
+def res_rint_smoothness(out: dict, x: torch.Tensor) -> torch.Tensor:
+    """Penalize sharp axial curvature in the learned interface."""
+    drint_dx = _grad(out["r_int"], x)
+    return _grad(drint_dx, x)
+
+
+def res_rint_x_monotonic(out: dict, x: torch.Tensor) -> torch.Tensor:
+    """Penalize interface radius increases downstream.
+
+    For the simple cold-wall/hot-inlet case, deposit thickness should not
+    decrease along the pipe, so r_int should be non-increasing with x.
+    """
+    drint_dx = _grad(out["r_int"], x)
+    return torch.relu(drint_dx)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -318,6 +346,11 @@ def res_inlet_bc(out: dict,
     R_ux = out["u_x"]     - u_x_pois
     R_ur = out["u_r"]
     return R_T, R_ux, R_ur
+
+
+def res_inlet_rint_bc(out: dict, cfg: CaseConfig) -> torch.Tensor:
+    """Keep the inlet interface clean: r_int(x=0,t) = r_w."""
+    return out["r_int"] - cfg.r_w
 
 
 def res_outlet_bc(out: dict,
@@ -421,6 +454,9 @@ def compute_all_residuals(model,
     R7a, R7b = res_T_continuity(out, case)
     results["T_cont_fluid"] = R7a
     results["T_cont_dep"]   = R7b
+    results["rint_mono"]    = res_rint_monotonic(out, t)
+    results["rint_x_mono"]  = res_rint_x_monotonic(out, x)
+    results["rint_smooth"]  = res_rint_smoothness(out, x)
 
     # ── Wall BC ───────────────────────────────────────────────────────────
     out, r, x, t = _fwd(batch["wall"])
@@ -435,6 +471,7 @@ def compute_all_residuals(model,
     results["bc_inlet_T"]   = R_iT
     results["bc_inlet_ux"]  = R_iux
     results["bc_inlet_ur"]  = R_iur
+    results["bc_inlet_rint"] = res_inlet_rint_bc(out, case)
 
     # ── Outlet BC ─────────────────────────────────────────────────────────
     out, r, x, t = _fwd(batch["outlet"])

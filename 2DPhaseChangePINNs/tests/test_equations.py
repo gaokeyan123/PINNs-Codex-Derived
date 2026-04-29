@@ -14,6 +14,7 @@ from equations import (
     res_mass, res_mom_x, res_mom_r,
     res_energy_fluid, res_energy_dep,
     res_stefan, res_T_continuity,
+    res_rint_monotonic, res_rint_x_monotonic, res_rint_smoothness,
     res_wall_bc, res_inlet_bc, res_outlet_bc, res_axis_bc, res_ic,
     compute_all_residuals,
 )
@@ -209,6 +210,19 @@ def test_T_continuity_shape_no_nan(model):
     assert not torch.isnan(R7a).any() and not torch.isnan(R7b).any()
 
 
+def test_rint_regularizers_shape_no_nan(model):
+    out, r, x, t = _fwd_with_H(model, _pts())
+    R_mono = res_rint_monotonic(out, t)
+    R_x_mono = res_rint_x_monotonic(out, x)
+    R_smooth = res_rint_smoothness(out, x)
+    assert R_mono.shape == (N_SMALL,)
+    assert R_x_mono.shape == (N_SMALL,)
+    assert R_smooth.shape == (N_SMALL,)
+    assert not torch.isnan(R_mono).any()
+    assert not torch.isnan(R_x_mono).any()
+    assert not torch.isnan(R_smooth).any()
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # 2.4  BC / IC residuals
 # ─────────────────────────────────────────────────────────────────────────
@@ -265,8 +279,9 @@ def test_compute_all_residuals_keys(model):
     expected = {
         "mass", "mom_x", "mom_r", "energy_fluid", "energy_dep",
         "stefan", "T_cont_fluid", "T_cont_dep",
+        "rint_mono", "rint_x_mono", "rint_smooth",
         "bc_wall_T", "bc_wall_ur", "bc_wall_ux",
-        "bc_inlet_T", "bc_inlet_ux", "bc_inlet_ur",
+        "bc_inlet_T", "bc_inlet_ux", "bc_inlet_ur", "bc_inlet_rint",
         "bc_outlet_Tf", "bc_outlet_ux",
         "bc_axis_ur", "bc_axis_Tf", "bc_axis_ux",
         "ic_rint", "ic_Tf", "ic_ux", "ic_ur",

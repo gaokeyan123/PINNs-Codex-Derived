@@ -230,7 +230,7 @@ def save_checkpoint(path: Path,
                     log: dict[str, float],
                     optimizer: torch.optim.Optimizer | None = None,
                     scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
-                    optimizer_name: str | None = None) -> Path:
+                    optimizer_name: str | None = None) -> Path | None:
     payload = {
         "model_version": MODEL_VERSION,
         "phase": phase,
@@ -251,8 +251,12 @@ def save_checkpoint(path: Path,
             f"[checkpoint] target exists, wrote fallback {target.name}",
             flush=True,
         )
-    torch.save(payload, target)
-    return target
+    try:
+        torch.save(payload, target)
+        return target
+    except (OSError, RuntimeError) as exc:
+        print(f"[checkpoint] skipped {target.name}: {exc}", flush=True)
+        return None
 
 
 def unique_checkpoint_path(path: Path, iteration: int) -> Path:
@@ -322,6 +326,8 @@ def save_best_and_latest(model: PINNSolidification,
     total = log["total"]
     if math.isfinite(total) and total < best_loss:
         best_loss = total
+        if not (save_latest or should_checkpoint(iteration, run_cfg)):
+            return best_loss
         best_name = f"pinns_v{MODEL_VERSION}_ep{iteration:05d}_loss{total:.4e}.pth"
         best_path = save_checkpoint(
             checkpoint_path(run_cfg, best_name),
@@ -335,8 +341,9 @@ def save_best_and_latest(model: PINNSolidification,
             scheduler=scheduler,
             optimizer_name=optimizer_name,
         )
-        cleanup_old_best_checkpoints(run_cfg, best_path.name)
-        update_best_models_md(run_cfg, best_path.name, total, iteration, phase)
+        if best_path is not None:
+            cleanup_old_best_checkpoints(run_cfg, best_path.name)
+            update_best_models_md(run_cfg, best_path.name, total, iteration, phase)
 
     if save_latest:
         latest = checkpoint_path(run_cfg, run_cfg.training.latest_checkpoint)

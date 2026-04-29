@@ -44,7 +44,8 @@ from pathlib import Path
 from config import Config, LossWeights
 from equations import (
     compute_all_residuals,
-    res_wall_bc, res_inlet_bc, res_outlet_bc, res_axis_bc, res_ic,
+    res_wall_bc, res_inlet_bc, res_inlet_rint_bc,
+    res_outlet_bc, res_axis_bc, res_ic,
 )
 
 
@@ -95,6 +96,7 @@ def _compute_bc_ic_residuals(model, batch: dict, cfg: Config) -> dict:
     results["bc_inlet_T"]   = R_iT
     results["bc_inlet_ux"]  = R_iux
     results["bc_inlet_ur"]  = R_iur
+    results["bc_inlet_rint"] = res_inlet_rint_bc(out, case)
 
     # Outlet BC
     out, r, x, t = _fwd(batch["outlet"])
@@ -127,7 +129,7 @@ def _compute_bc_ic_residuals(model, batch: dict, cfg: Config) -> dict:
 # BC/IC residual keys — averaged together into a single L_bc_ic term
 _BC_IC_KEYS = [
     "bc_wall_T",   "bc_wall_ur",   "bc_wall_ux",
-    "bc_inlet_T",  "bc_inlet_ux",  "bc_inlet_ur",
+    "bc_inlet_T",  "bc_inlet_ux",  "bc_inlet_ur", "bc_inlet_rint",
     "bc_outlet_Tf","bc_outlet_ux",
     "bc_axis_ur",  "bc_axis_Tf",   "bc_axis_ux",
     "ic_rint",     "ic_Tf",        "ic_ux",        "ic_ur",
@@ -166,11 +168,14 @@ def compute_loss_terms(residuals: dict,
         terms["T_cont"]  = weights.T_continuity * (
             mse(residuals["T_cont_fluid"]) + mse(residuals["T_cont_dep"])
         ) * 0.5
+        terms["rint_mono"] = weights.rint_mono * mse(residuals["rint_mono"])
+        terms["rint_x_mono"] = weights.rint_x_mono * mse(residuals["rint_x_mono"])
+        terms["rint_smooth"] = weights.rint_smooth * mse(residuals["rint_smooth"])
     else:
         # Physics terms get zero scalar placeholders for logging consistency
         zero = torch.tensor(0.0)
         for k in ("mass", "mom_x", "mom_r", "energy_fluid", "energy_dep",
-                  "stefan", "T_cont"):
+                  "stefan", "T_cont", "rint_mono", "rint_x_mono", "rint_smooth"):
             terms[k] = zero
 
     # ── BC + IC residuals (averaged over all 15 sub-terms) ───────────────
@@ -267,8 +272,11 @@ def format_loss_line(log: dict[str, float], iteration: int,
         phys_str   = f"phys {phys:.2e}"
         stefan_str = f"stefan {log.get('stefan', 0):.2e}"
         Tcont_str  = f"T_cont {log.get('T_cont', 0):.2e}"
+        rint_str   = (
+            f"rint {(log.get('rint_mono', 0) + log.get('rint_x_mono', 0) + log.get('rint_smooth', 0)):.2e}"
+        )
         return (f"iter {iteration:5d} | {total_str} | {bc_ic_str} | "
-                f"{phys_str} | {stefan_str} | {Tcont_str}")
+                f"{phys_str} | {stefan_str} | {Tcont_str} | {rint_str}")
     else:
         return (f"iter {iteration:5d} | {total_str} | {bc_ic_str}"
                 f"  [BC/IC only]")

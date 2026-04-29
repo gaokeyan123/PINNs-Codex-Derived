@@ -90,6 +90,16 @@ class PINNSolidification(nn.Module):
                 nn.init.xavier_normal_(m.weight)
                 nn.init.zeros_(m.bias)
 
+    def _normalise_inputs(self,
+                          r: torch.Tensor,
+                          x: torch.Tensor,
+                          t: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Scale each coordinate to roughly [0, 1] before Fourier encoding."""
+        r_n = r / max(self.case.r_w, 1e-12)
+        x_n = x / max(self.case.L, 1e-12)
+        t_n = t / max(self.case.t_end, 1e-12)
+        return r_n, x_n, t_n
+
     def forward(self, r: torch.Tensor, x: torch.Tensor, t: torch.Tensor):
         """
         r, x, t : shape [N]  (flat tensors, requires_grad=True for PDE residuals)
@@ -101,9 +111,10 @@ class PINNSolidification(nn.Module):
         r = r.unsqueeze(-1)   # [N, 1]
         x = x.unsqueeze(-1)
         t = t.unsqueeze(-1)
+        r_n, x_n, t_n = self._normalise_inputs(r, x, t)
 
         # Field trunk: all three inputs
-        inp_3d = torch.cat([r, x, t], dim=-1)          # [N, 3]
+        inp_3d = torch.cat([r_n, x_n, t_n], dim=-1)    # [N, 3]
         enc_3d = self.fourier_3d(inp_3d)                # [N, 2F]
         features = self.trunk(enc_3d)                   # [N, H]
         raw = self.field_head(features)                 # [N, 5]
@@ -115,7 +126,7 @@ class PINNSolidification(nn.Module):
         Theta_dep = torch.sigmoid(raw[:, 4])
 
         # Interface trunk: (x, t) only — r is NOT used
-        inp_2d = torch.cat([x, t], dim=-1)              # [N, 2]
+        inp_2d = torch.cat([x_n, t_n], dim=-1)          # [N, 2]
         enc_2d = self.fourier_2d(inp_2d)                # [N, 2F]
         int_feat = self.int_trunk(enc_2d)               # [N, H]
         r_int = torch.sigmoid(self.int_head(int_feat)).squeeze(-1) * self.case.r_w
