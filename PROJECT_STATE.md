@@ -1,6 +1,6 @@
 # PROJECT STATE
 > **Auto-maintained by Claude.** Updated at every milestone or model logic change.  
-> Last updated: 2026-04-29 | Phase: **1 — Network & Non-Dimensionalisation**
+> Last updated: 2026-04-29 | Phase: **1 — Network & Non-Dimensionalisation** 🟡 (config + network complete)
 
 ---
 
@@ -41,8 +41,8 @@ Completed sub-tasks:
 - [x] Governing equations derived in 2D axisymmetric conservative form
 - [x] Non-dimensional groups defined (Pe, Ste, Re, Fo)
 - [x] Roadmap and project files initialised
-- [ ] `config.py` — case parameters and non-dim scales
-- [ ] `network.py` — Fourier-encoded MLP with field + interface heads
+- [x] `config.py` — case parameters and non-dim scales
+- [x] `network.py` — Fourier-encoded MLP with field + interface heads
 - [ ] `equations.py` — autograd PDE residuals
 - [ ] `sampling.py` — collocation + adaptive interface sampling
 - [ ] `losses.py` — weighted composite loss
