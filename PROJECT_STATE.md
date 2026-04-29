@@ -1,6 +1,6 @@
 # PROJECT STATE
 > **Auto-maintained by Claude.** Updated at every milestone or model logic change.  
-> Last updated: 2026-04-29 | Phase: **1 — Network & Non-Dimensionalisation** 🟡 (config + network complete)
+> Last updated: 2026-04-29 | Phase: **2 — PDE Residuals via Autograd** ✅
 
 ---
 
@@ -43,7 +43,7 @@ Completed sub-tasks:
 - [x] Roadmap and project files initialised
 - [x] `config.py` — case parameters and non-dim scales
 - [x] `network.py` — Fourier-encoded MLP with field + interface heads
-- [ ] `equations.py` — autograd PDE residuals
+- [x] `equations.py` — autograd PDE residuals (R1–R7 + all BCs/ICs)
 - [ ] `sampling.py` — collocation + adaptive interface sampling
 - [ ] `losses.py` — weighted composite loss
 - [ ] `train.py` — three-phase training loop
@@ -102,6 +102,10 @@ Completed sub-tasks:
 | 2026-04-29 | Interface head masked to $(x,t)$ only | $r_{int}$ is physically 1D (no $r$-dependence) — encoding this as an inductive bias |
 | 2026-04-29 | Stefan and BC losses weighted 10× and 100× | These are hard constraints; PDE residuals are softer |
 | 2026-04-29 | `.pth` files gitignored; `BEST_MODELS.md` tracked | Prevents repo bloat; maintains version record for thesis |
+| 2026-04-29 | `_grad` uses `grad_outputs=ones` + `allow_unused=True` | Standard batch-PINN gradient; allow_unused avoids crash when interface head receives r=0 gradient |
+| 2026-04-29 | Cylindrical Laplacian clamps r to `_R_MIN=1e-6` | Prevents NaN at axis r=0; affects only axis-adjacent points |
+| 2026-04-29 | `(1/Pe)` factor on unsteady momentum term | Time is scaled by thermal diffusion time τ=r_w²/α_f; convective and thermal scales coincide only at Pe=1 |
+| 2026-04-29 | H_ε uses `.detach()` on r_int when computing Heaviside | Prevents gradient from flowing through H into interface head during interior PDE residuals |
 
 ---
 

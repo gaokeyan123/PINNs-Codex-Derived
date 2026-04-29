@@ -40,22 +40,25 @@
 
 ---
 
-## PHASE 2 — PDE Residuals via Autograd
+## PHASE 2 — PDE Residuals via Autograd ✅
 
 > **Goal:** All five PDE residuals + Stefan condition computable from a single forward pass.
 
-- [ ] **`equations.py`** — All residuals using `torch.autograd.grad`
-  - Smooth Heaviside $H_\epsilon(r, r_{int})$ with $\epsilon$ from config
-  - $\mathcal{R}_1$: mass conservation (fluid, weighted by $1-H_\epsilon$)
-  - $\mathcal{R}_2$: axial momentum ($x$-direction)
-  - $\mathcal{R}_3$: radial momentum ($r$-direction), include $-\mu u_r/r^2$ geometric term
-  - $\mathcal{R}_4$: fluid energy (advection–diffusion, Pe in coefficients)
-  - $\mathcal{R}_5$: deposit energy (pure diffusion, weighted by $H_\epsilon$)
-  - $\mathcal{R}_6$: Stefan condition — Ste $\cdot \dot{r}_{int}$ = flux jump
-  - $\mathcal{R}_7$: temperature continuity $\Theta_f = \Theta_{dep} = \Theta_{solidus}$ at interface
-  - Helper: cylindrical Laplacian $\nabla^2_\text{cyl} f = \frac{1}{r}\partial_r(r\partial_r f) + \partial_{xx} f$
+- [x] **`equations.py`** — All residuals using `torch.autograd.grad`
+  - [x] Derivative utilities: `_grad`, `_laplacian_cyl`, `_poiseuille`
+  - [x] $\mathcal{R}_1$: mass conservation — incompressible continuity, $(1-H_\epsilon)$ weighted
+  - [x] $\mathcal{R}_2$: axial momentum — includes $(1/\text{Pe})$ unsteady, $(1/\text{Re})$ viscous
+  - [x] $\mathcal{R}_3$: radial momentum — geometric source $-u_r/r^2$ included
+  - [x] $\mathcal{R}_4$: fluid energy — advection–diffusion with Pe coefficient
+  - [x] $\mathcal{R}_5$: deposit energy — pure diffusion, $k_{ratio}$ coefficient, $H_\epsilon$ weighted
+  - [x] $\mathcal{R}_6$: Stefan condition — Ste·$\dot{r}_{int}$ = flux jump (autograd $\partial r_{int}/\partial t$)
+  - [x] $\mathcal{R}_7$: temperature continuity $\Theta_f = \Theta_{dep} = \Theta_{solidus}$ at interface
+  - [x] BC residuals: wall (Dirichlet T, no-slip), inlet (Poiseuille + hot T), outlet (zero-grad), axis (symmetry)
+  - [x] IC residuals: $r_{int}=r_w$, $\Theta_f=1$, Poiseuille $u_x$, $u_r=0$ at $t=0$
+  - [x] `compute_all_residuals(model, batch, cfg)` — master function returning all 23 residual tensors
+- [x] `tests/test_equations.py` — 22 tests: derivative accuracy, Heaviside weighting, shape/NaN checks
 
-- [ ] **Milestone:** Each residual verified to be $O(1)$ on random inputs for Poiseuille IC. Log residual magnitudes in `Verification_Log.md`.
+- [ ] **Milestone:** Each residual verified $O(1)$ on random inputs. Log in `Verification_Log.md`.
 
 ---
 
