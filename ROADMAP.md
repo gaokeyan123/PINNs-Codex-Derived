@@ -62,18 +62,23 @@
 
 ---
 
-## PHASE 3 — Sampling Strategy
+## PHASE 3 — Sampling Strategy ✅
 
 > **Goal:** Collocation points that cover the domain well and chase the moving interface.
 
-- [ ] **`sampling.py`** — Point generators
-  - `sample_interior(N)`: Latin Hypercube in $(\hat{r}, \hat{x}, \hat{t})$
-  - `sample_interface(model, N)`: evaluate $\hat{r}_{int}(\hat{x}_i, \hat{t}_i)$ from current network, place points on predicted interface
-  - `sample_boundary(N_each)`: wall, inlet, outlet, axis — uniform or stratified
-  - `sample_ic(N)`: $\hat{t}=0$ points
-  - `resample_interface(model, P_Γ)`: called every 500 iters during training
+- [x] **`sampling.py`** — Point generators (no scipy dependency)
+  - [x] `_lhs(N, d, seed)`: pure-PyTorch Latin Hypercube; verified by stratum bincount test
+  - [x] `sample_interior(N, cfg)`: LHS in $(\hat{r}, \hat{x}, \hat{t})$, spans both subdomains
+  - [x] `sample_wall / inlet / outlet / axis`: fixed boundary coordinate + LHS for free coords
+  - [x] `sample_axis`: r = 1e-4 (not 0) to avoid 1/r singularity
+  - [x] `sample_ic(N, cfg)`: LHS in $(\hat{r}, \hat{x})$ at $\hat{t}=0$
+  - [x] `sample_interface(model, N, cfg)`: no_grad query → r_int values become r coords; detach + re-wrap
+  - [x] `resample_interface(model, N, cfg, seed)`: thin wrapper called every 500 iters in training
+  - [x] `build_batch(model, cfg, seed)`: assembles all 7 point sets with per-set sub-seeds
+  - [x] `plot_batch(batch, cfg, save_path)`: scatter in $(x,r)$ plane — milestone visualisation
+- [x] `tests/test_sampling.py` — 27 tests: LHS stratification, bounds, requires_grad, interface accuracy, reproducibility, plot
 
-- [ ] **Milestone:** Visualise sampled points in 2D $(r,x)$ slice and confirm interface points track the predicted interface. Save figure to `outputs/`.
+- [ ] **Milestone:** Run `python sampling.py` and verify `outputs/collocation_points.png` — interface points should form a coherent curve.
 
 ---
 

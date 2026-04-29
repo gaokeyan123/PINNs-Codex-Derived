@@ -1,6 +1,6 @@
 # PROJECT STATE
 > **Auto-maintained by Claude.** Updated at every milestone or model logic change.  
-> Last updated: 2026-04-29 | Phase: **2 — PDE Residuals via Autograd** ✅
+> Last updated: 2026-04-29 | Phase: **3 — Sampling Strategy** ✅
 
 ---
 
@@ -44,7 +44,7 @@ Completed sub-tasks:
 - [x] `config.py` — case parameters and non-dim scales
 - [x] `network.py` — Fourier-encoded MLP with field + interface heads
 - [x] `equations.py` — autograd PDE residuals (R1–R7 + all BCs/ICs)
-- [ ] `sampling.py` — collocation + adaptive interface sampling
+- [x] `sampling.py` — Latin Hypercube interior, adaptive interface, boundary/IC samplers, plot_batch
 - [ ] `losses.py` — weighted composite loss
 - [ ] `train.py` — three-phase training loop
 - [ ] `postprocess.py` — plots and MATLAB comparison
@@ -106,6 +106,10 @@ Completed sub-tasks:
 | 2026-04-29 | Cylindrical Laplacian clamps r to `_R_MIN=1e-6` | Prevents NaN at axis r=0; affects only axis-adjacent points |
 | 2026-04-29 | `(1/Pe)` factor on unsteady momentum term | Time is scaled by thermal diffusion time τ=r_w²/α_f; convective and thermal scales coincide only at Pe=1 |
 | 2026-04-29 | H_ε uses `.detach()` on r_int when computing Heaviside | Prevents gradient from flowing through H into interface head during interior PDE residuals |
+| 2026-04-29 | Pure-PyTorch LHS (no scipy) in sampling.py | Portability: avoids scipy dependency; stratification verified by bincount test |
+| 2026-04-29 | Axis points use r=1e-4, not r=0 | Avoids 1/r singularity in _laplacian_cyl; safely above _R_MIN=1e-6 |
+| 2026-04-29 | sample_interface detaches r_int and re-wraps with requires_grad | Prevents stale computation graph references across training iterations |
+| 2026-04-29 | resample_interface uses advancing seed each call | Ensures fresh (x,t) pairs every resample step; same seed → reproducible |
 
 ---
 
