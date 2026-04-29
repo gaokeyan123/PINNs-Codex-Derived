@@ -31,6 +31,8 @@ env/
 2DPhaseChangePINNs/outputs/*.npz
 2DPhaseChangePINNs/outputs/*.png
 2DPhaseChangePINNs/outputs/*.pdf
+2DPhaseChangePINNs/outputs/*.csv
+2DPhaseChangePINNs/outputs/*.json
 
 # ── OS noise ──────────────────────────────────────────────────────────────────
 .DS_Store

@@ -1,6 +1,6 @@
 # PROJECT STATE
 > **Auto-maintained by Claude.** Updated at every milestone or model logic change.  
-> Last updated: 2026-04-29 | Phase: **4 — Loss Function Assembly** ✅
+> Last updated: 2026-04-29 | Phase: **6 - Post-Processing & Validation Tooling** In Progress
 
 ---
 
@@ -34,8 +34,8 @@ This project develops a PINN-based surrogate model to replace conventional CFD (
 
 ## 2. Current Phase
 
-**Phase 1 — Network Architecture & Non-Dimensionalisation**  
-Status: 🟡 In Progress
+**Phase 6 - Post-Processing & Validation Tooling**
+Status: In Progress
 
 Completed sub-tasks:
 - [x] Governing equations derived in 2D axisymmetric conservative form
@@ -46,8 +46,9 @@ Completed sub-tasks:
 - [x] `equations.py` — autograd PDE residuals (R1–R7 + all BCs/ICs)
 - [x] `sampling.py` — Latin Hypercube interior, adaptive interface, boundary/IC samplers, plot_batch
 - [x] `losses.py` — 8 named weighted terms, Phase 1 fast path, compute_loss, format_loss_line, log_to_csv
-- [ ] `train.py` — three-phase training loop
-- [ ] `postprocess.py` — plots and MATLAB comparison
+- [x] `train.py` - three-phase training loop, smoke mode, checkpoint/resume, CSV logging
+- [x] `postprocess.py` - dense-grid plots, residual maps, optional MATLAB interface overlay
+- [x] Smoke verification: `python train.py --smoke`, resume from `checkpoints/latest.pth`, and small-grid `postprocess.py`
 
 ---
 
@@ -87,9 +88,14 @@ Completed sub-tasks:
 
 | Phase | Iters | Optimizer | LR | Loss active |
 |---|---|---|---|---|
-| 1 — BC/IC pre-train | 0–2k | Adam | $10^{-3}$ | $\mathcal{L}_8$ only |
-| 2 — Full physics | 2k–40k | Adam + cosine anneal | $10^{-3} \to 10^{-5}$ | All terms |
-| 3 — Refinement | 40k–50k | L-BFGS | 1.0 | All terms |
+| 1 - BC/IC pre-train | 0-2k | Adam | $10^{-3}$ | $\mathcal{L}_8$ only |
+| 2 - Full physics | 2k-40k | Adam + cosine anneal | $10^{-3} \to 10^{-5}$ | All terms |
+| 3 - Refinement | 40k-50k | L-BFGS | 1.0 | All terms |
+
+Implementation notes:
+- `train.py --smoke` runs tiny CPU-safe counts while preserving full default settings for production runs.
+- Checkpoints include model, optimizer, scheduler, phase, iteration, best loss, config snapshot, and RNG state.
+- `postprocess.py` produces PINN-only plots without MATLAB data and overlays MATLAB interface data when `outputs/matlab_ref.mat` is available.
 
 ---
 
@@ -114,6 +120,8 @@ Completed sub-tasks:
 | 2026-04-29 | 15 BC/IC residuals averaged before applying `w_bc_ic` weight | Prevents large-N BC sets from dominating; each sub-term contributes equally |
 | 2026-04-29 | R7 (T_cont) averages fluid + deposit continuity, ×0.5 | Both must be satisfied symmetrically; prevents double-counting |
 | 2026-04-29 | `log_to_csv` appends rows with `write_header` flag | Single function used throughout training; header written once at iter 0 |
+| 2026-04-29 | Added three-phase `train.py` with smoke mode and full resume checkpoints | Enables careful CPU verification locally while preserving 50k-iteration production defaults |
+| 2026-04-29 | Added `postprocess.py` with optional MATLAB interface overlay | PINN plots and residual maps are available before MATLAB reference export exists |
 
 ---
 

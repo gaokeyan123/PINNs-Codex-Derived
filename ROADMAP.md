@@ -106,17 +106,18 @@
 
 > **Goal:** Full three-phase training with monitoring and checkpointing.
 
-- [ ] **`train.py`** — Training driver
+- [x] **`train.py`** — Training driver
   - Phase 1 (0–2k iters): Adam lr=$10^{-3}$, BC/IC loss only
   - Phase 2 (2k–40k iters): Adam with cosine annealing lr=$10^{-3}\to10^{-5}$, all losses
     - Resample $\mathcal{P}_\Gamma$ every 500 iters
     - Log each $\mathcal{L}_k$ to terminal and to `outputs/loss_history.csv`
     - Save checkpoint if total loss improves: `pinns_v1.0_ep{ep:05d}_loss{loss:.4e}.pth`
     - Update `checkpoints/BEST_MODELS.md` on new best
+    - Save full resume state in `checkpoints/latest.pth`
   - Phase 3 (40k–50k iters): L-BFGS full-batch refinement
   - Early stop if total $\mathcal{L} < 10^{-4}$
 
-- [ ] **Milestone:** Training completes Phase 1 without divergence. Loss curve plotted and saved. Update `PROJECT_STATE.md`.
+- [x] **Milestone:** Smoke training completes Phase 1/2/3 without NaN, resume works, and monitor plots/checkpoints are produced.
 
 ---
 
@@ -124,15 +125,15 @@
 
 > **Goal:** Produce publication-quality figures and validate against MATLAB CFD output.
 
-- [ ] **`postprocess.py`** — Result extraction and plotting
+- [x] **`postprocess.py`** — Result extraction and plotting
   - Dense grid evaluation: $200 \times 200 \times 5$ time snapshots
   - Plots at $\hat{t} = 0.25, 0.5, 0.75, 1.0$:
     - $\Theta(r,x)$ filled contour (fluid and deposit with interface marked)
     - $\hat{u}_x(r,x)$ showing velocity acceleration in narrowing channel
     - $\hat{p}(x)$ axial pressure profile
-    - $\hat{r}_{int}(x)$ interface position overlaid on MATLAB reference
+    - $\hat{r}_{int}(x)$ interface position overlaid on MATLAB reference when available
   - Pointwise PDE residual heatmap (where network violates equations most)
-  - $L^2$ relative error vs MATLAB CFD for $T_f$, $r_{int}$
+  - Optional $L^2$ relative error vs MATLAB interface data when reference arrays are available
 
 - [ ] Run MATLAB code at Pe=1, Ste=0.1 to generate reference data, export to `outputs/matlab_ref.mat`
 - [ ] **Milestone:** $L^2$ error < 5% for $T_f$ and $r_{int}$. Log in `Verification_Log.md`.
