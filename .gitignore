@@ -27,6 +27,7 @@ env/
 2DPhaseChangePINNs/checkpoints/*.pth
 2DPhaseChangePINNs/checkpoints/**/*.pth
 2DPhaseChangePINNs/checkpoints/.*.tmp-*
+2DPhaseChangePINNs/checkpoints/**/BEST_MODELS.md
 
 # ── Large outputs (figures / numpy dumps) ─────────────────────────────────────
 2DPhaseChangePINNs/outputs/*.npy
@@ -35,6 +36,12 @@ env/
 2DPhaseChangePINNs/outputs/*.pdf
 2DPhaseChangePINNs/outputs/*.csv
 2DPhaseChangePINNs/outputs/*.json
+2DPhaseChangePINNs/outputs/**/*.npy
+2DPhaseChangePINNs/outputs/**/*.npz
+2DPhaseChangePINNs/outputs/**/*.png
+2DPhaseChangePINNs/outputs/**/*.pdf
+2DPhaseChangePINNs/outputs/**/*.csv
+2DPhaseChangePINNs/outputs/**/*.json
 
 # ── OS noise ──────────────────────────────────────────────────────────────────
 .DS_Store

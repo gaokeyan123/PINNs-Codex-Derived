@@ -18,7 +18,7 @@ import json
 import math
 import random
 import time
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +49,16 @@ LOSS_FIELDS = [
 ]
 
 
+@dataclass
+class TargetStop:
+    thickness: float
+    mode: str
+    t_value: float
+    grid_n: int
+    check_every: int
+    min_iter: int
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train the pipe-solidification PINN.")
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
@@ -60,6 +70,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--phase3-iters", type=int, default=None)
     parser.add_argument("--plot-every", type=int, default=None)
     parser.add_argument("--checkpoint-every", type=int, default=None)
+    parser.add_argument("--n-interior", type=int, default=None)
+    parser.add_argument("--n-interface", type=int, default=None)
+    parser.add_argument("--n-boundary", type=int, default=None)
+    parser.add_argument("--n-ic", type=int, default=None)
+    parser.add_argument("--target-solid-thickness", type=float, default=None)
+    parser.add_argument("--target-thickness-mode", choices=("max", "mean", "min"), default="mean")
+    parser.add_argument("--target-time", type=float, default=None)
+    parser.add_argument("--target-grid-n", type=int, default=128)
+    parser.add_argument("--target-check-every", type=int, default=None)
+    parser.add_argument("--target-min-iter", type=int, default=0)
     parser.add_argument("--resume", type=Path, default=None)
     parser.add_argument("--smoke", action="store_true", help="Run a tiny end-to-end verification job.")
     return parser.parse_args()
@@ -114,6 +134,14 @@ def apply_cli_overrides(base: Config, args: argparse.Namespace) -> Config:
         run_cfg.training.plot_every = args.plot_every
     if args.checkpoint_every is not None:
         run_cfg.training.checkpoint_every = args.checkpoint_every
+    if args.n_interior is not None:
+        run_cfg.sampling.N_interior = args.n_interior
+    if args.n_interface is not None:
+        run_cfg.sampling.N_interface = args.n_interface
+    if args.n_boundary is not None:
+        run_cfg.sampling.N_boundary = args.n_boundary
+    if args.n_ic is not None:
+        run_cfg.sampling.N_ic = args.n_ic
 
     if args.smoke:
         run_cfg.sampling.N_interior = 32
@@ -400,13 +428,79 @@ def check_log_is_finite(log: dict[str, float], phase: str, iteration: int) -> No
         raise FloatingPointError(f"Non-finite loss in {phase} at iter {iteration}: {bad}")
 
 
+def build_target_stop(args: argparse.Namespace, run_cfg: Config) -> TargetStop | None:
+    if args.target_solid_thickness is None:
+        return None
+    check_every = (
+        args.target_check_every
+        if args.target_check_every is not None
+        else max(1, run_cfg.training.log_every)
+    )
+    return TargetStop(
+        thickness=args.target_solid_thickness,
+        mode=args.target_thickness_mode,
+        t_value=run_cfg.case.t_end if args.target_time is None else args.target_time,
+        grid_n=args.target_grid_n,
+        check_every=check_every,
+        min_iter=args.target_min_iter,
+    )
+
+
+def interface_thickness_stats(model: PINNSolidification,
+                              run_cfg: Config,
+                              device: torch.device,
+                              target: TargetStop) -> dict[str, float]:
+    was_training = model.training
+    model.eval()
+    x = torch.linspace(0.0, run_cfg.case.L, target.grid_n, device=device)
+    t = torch.full_like(x, target.t_value)
+    r = torch.zeros_like(x)
+    with torch.no_grad():
+        r_int = model(r, x, t)["r_int"]
+        thickness = run_cfg.case.r_w - r_int
+    if was_training:
+        model.train()
+    return {
+        "min": float(thickness.min().item()),
+        "mean": float(thickness.mean().item()),
+        "max": float(thickness.max().item()),
+        "r_int_min": float(r_int.min().item()),
+        "r_int_mean": float(r_int.mean().item()),
+        "r_int_max": float(r_int.max().item()),
+    }
+
+
+def check_target_stop(model: PINNSolidification,
+                      run_cfg: Config,
+                      device: torch.device,
+                      target: TargetStop | None,
+                      phase: str,
+                      iteration: int) -> bool:
+    if target is None:
+        return False
+    if iteration < target.min_iter:
+        return False
+    if iteration == 1 or iteration % target.check_every != 0:
+        return False
+    stats = interface_thickness_stats(model, run_cfg, device, target)
+    value = stats[target.mode]
+    print(
+        f"[target] iter {iteration} {phase} thickness "
+        f"min/mean/max={stats['min']:.4f}/{stats['mean']:.4f}/{stats['max']:.4f} "
+        f"at t={target.t_value:g} ({target.mode} target {target.thickness:.4f})",
+        flush=True,
+    )
+    return value >= target.thickness
+
+
 def run_phase1(model: PINNSolidification,
                run_cfg: Config,
                device: torch.device,
                csv_path: Path,
                start_iter: int,
                best_loss: float,
-               resume_payload: dict[str, Any] | None) -> tuple[int, float, bool]:
+               resume_payload: dict[str, Any] | None,
+               target: TargetStop | None) -> tuple[int, float, bool]:
     end_iter = run_cfg.training.phase1_iters
     if start_iter >= end_iter:
         return start_iter, best_loss, False
@@ -443,6 +537,9 @@ def run_phase1(model: PINNSolidification,
                 or log["total"] < run_cfg.training.loss_target
             ),
         )
+        if check_target_stop(model, run_cfg, device, target, "phase1", iteration):
+            print(f"[stop] target solid thickness reached in phase1 at iter {iteration}", flush=True)
+            return iteration, best_loss, True
         if log["total"] < run_cfg.training.loss_target:
             print(f"[stop] target loss reached in phase1 at iter {iteration}", flush=True)
             return iteration, best_loss, True
@@ -455,13 +552,16 @@ def run_phase2(model: PINNSolidification,
                csv_path: Path,
                start_iter: int,
                best_loss: float,
-               resume_payload: dict[str, Any] | None) -> tuple[int, float, bool]:
+               resume_payload: dict[str, Any] | None,
+               target: TargetStop | None) -> tuple[int, float, bool]:
     phase1_end = run_cfg.training.phase1_iters
     phase2_end = run_cfg.training.phase2_iters
     if start_iter >= phase2_end:
         return start_iter, best_loss, False
 
     first_iter = max(start_iter + 1, phase1_end + 1)
+    if start_iter <= phase1_end:
+        best_loss = float("inf")
     phase2_steps = max(phase2_end - phase1_end, 1)
     optimizer = torch.optim.Adam(model.parameters(), lr=run_cfg.training.phase2_lr_start)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -507,6 +607,9 @@ def run_phase2(model: PINNSolidification,
                 or log["total"] < run_cfg.training.loss_target
             ),
         )
+        if check_target_stop(model, run_cfg, device, target, "phase2", iteration):
+            print(f"[stop] target solid thickness reached in phase2 at iter {iteration}", flush=True)
+            return iteration, best_loss, True
         if log["total"] < run_cfg.training.loss_target:
             print(f"[stop] target loss reached in phase2 at iter {iteration}", flush=True)
             return iteration, best_loss, True
@@ -519,7 +622,8 @@ def run_phase3(model: PINNSolidification,
                csv_path: Path,
                start_iter: int,
                best_loss: float,
-               resume_payload: dict[str, Any] | None) -> tuple[int, float, bool]:
+               resume_payload: dict[str, Any] | None,
+               target: TargetStop | None) -> tuple[int, float, bool]:
     phase2_end = run_cfg.training.phase2_iters
     phase3_end = phase2_end + run_cfg.training.phase3_iters
     if start_iter >= phase3_end:
@@ -581,6 +685,9 @@ def run_phase3(model: PINNSolidification,
                 or log["total"] < run_cfg.training.loss_target
             ),
         )
+        if check_target_stop(model, run_cfg, device, target, "phase3", iteration):
+            print(f"[stop] target solid thickness reached in phase3 at iter {iteration}", flush=True)
+            return iteration, best_loss, True
         if log["total"] < run_cfg.training.loss_target:
             print(f"[stop] target loss reached in phase3 at iter {iteration}", flush=True)
             return iteration, best_loss, True
@@ -599,6 +706,7 @@ def main() -> None:
     ensure_dirs(run_cfg)
     seed_everything(run_cfg.seed)
     save_run_config(run_cfg)
+    target = build_target_stop(args, run_cfg)
 
     model = PINNSolidification(run_cfg.network, run_cfg.case, seed=run_cfg.seed).to(device)
     print(f"[train] device={device} seed={run_cfg.seed} params={count_parameters(model):,}", flush=True)
@@ -608,6 +716,18 @@ def main() -> None:
         f"p3={run_cfg.training.phase2_iters + run_cfg.training.phase3_iters}",
         flush=True,
     )
+    print(
+        f"[train] case: Ste={run_cfg.case.Ste:g} Pe={run_cfg.case.Pe:g} "
+        f"Re={run_cfg.case.Re:g} k_ratio={run_cfg.case.k_ratio:g} "
+        f"t_end={run_cfg.case.t_end:g}",
+        flush=True,
+    )
+    if target is not None:
+        print(
+            f"[train] target: {target.mode} solid thickness >= {target.thickness:g} "
+            f"at t={target.t_value:g}, min_iter={target.min_iter}",
+            flush=True,
+        )
 
     resume_payload: dict[str, Any] | None = None
     start_iter = 0
@@ -621,15 +741,15 @@ def main() -> None:
     csv_path = run_cfg.output_dir / "loss_history.csv"
     t0 = time.time()
     start_iter, best_loss, stopped = run_phase1(
-        model, run_cfg, device, csv_path, start_iter, best_loss, resume_payload
+        model, run_cfg, device, csv_path, start_iter, best_loss, resume_payload, target
     )
     if not stopped:
         start_iter, best_loss, stopped = run_phase2(
-            model, run_cfg, device, csv_path, start_iter, best_loss, resume_payload
+            model, run_cfg, device, csv_path, start_iter, best_loss, resume_payload, target
         )
     if not stopped:
         start_iter, best_loss, stopped = run_phase3(
-            model, run_cfg, device, csv_path, start_iter, best_loss, resume_payload
+            model, run_cfg, device, csv_path, start_iter, best_loss, resume_payload, target
         )
     elapsed = time.time() - t0
     print(

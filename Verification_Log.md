@@ -19,6 +19,7 @@ Verifies that each PDE residual is $O(1)$ on a known analytical IC (Poiseuille f
 | Date | Net version | Phase reached | Final $\mathcal{L}_{total}$ | $\mathcal{L}_{BC}$ | $\mathcal{L}_{Stefan}$ | Iters | Wall time | Notes |
 |---|---|---|---|---|---|---|---|---|
 | 2026-04-29 | v1.0 | Phase 3 short CPU smoke | $9.4286\times10^1$ | $2.66\times10^1$ | $1.42$ | 48 | 6.7 s | Best checkpoint at iter 30 with $L=5.4630$; full 50k training not run locally |
+| 2026-04-29 | v1.0 | Phase 2 reduced CPU case | $1.0638\times10^1$ | $4.58$ | $0.539$ | 1600 | 441.9 s total | Pe=1, Ste=0.1, Re=10; mean thickness at $t=1$ was 0.355, max thickness 1.000; target mean 0.5 not reached |
 
 ---
 
