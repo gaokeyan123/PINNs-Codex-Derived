@@ -88,6 +88,7 @@ class TrainingConfig:
     checkpoint_dir: Path = ROOT / "checkpoints"
     log_every: int = 500         # print + csv log interval
     plot_every: int = 1_000      # monitoring plot interval
+    checkpoint_every: int = 500  # latest checkpoint interval
     latest_checkpoint: str = "latest.pth"
 
 

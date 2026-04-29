@@ -25,6 +25,8 @@ env/
 # Example:          pinns_v1.0_ep05000_loss1.2345e-04.pth
 # Keep only the best checkpoint per version; log it in checkpoints/BEST_MODELS.md
 2DPhaseChangePINNs/checkpoints/*.pth
+2DPhaseChangePINNs/checkpoints/**/*.pth
+2DPhaseChangePINNs/checkpoints/.*.tmp-*
 
 # ── Large outputs (figures / numpy dumps) ─────────────────────────────────────
 2DPhaseChangePINNs/outputs/*.npy

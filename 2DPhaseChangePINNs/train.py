@@ -59,6 +59,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--phase2-iters", type=int, default=None)
     parser.add_argument("--phase3-iters", type=int, default=None)
     parser.add_argument("--plot-every", type=int, default=None)
+    parser.add_argument("--checkpoint-every", type=int, default=None)
     parser.add_argument("--resume", type=Path, default=None)
     parser.add_argument("--smoke", action="store_true", help="Run a tiny end-to-end verification job.")
     return parser.parse_args()
@@ -111,6 +112,8 @@ def apply_cli_overrides(base: Config, args: argparse.Namespace) -> Config:
         run_cfg.training.phase3_iters = args.phase3_iters
     if args.plot_every is not None:
         run_cfg.training.plot_every = args.plot_every
+    if args.checkpoint_every is not None:
+        run_cfg.training.checkpoint_every = args.checkpoint_every
 
     if args.smoke:
         run_cfg.sampling.N_interior = 32
@@ -123,6 +126,7 @@ def apply_cli_overrides(base: Config, args: argparse.Namespace) -> Config:
         run_cfg.training.phase3_iters = 1 if args.phase3_iters is None else args.phase3_iters
         run_cfg.training.log_every = 1
         run_cfg.training.plot_every = 2 if args.plot_every is None else args.plot_every
+        run_cfg.training.checkpoint_every = 10 if args.checkpoint_every is None else args.checkpoint_every
     return run_cfg
 
 
@@ -198,7 +202,7 @@ def save_checkpoint(path: Path,
                     log: dict[str, float],
                     optimizer: torch.optim.Optimizer | None = None,
                     scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
-                    optimizer_name: str | None = None) -> None:
+                    optimizer_name: str | None = None) -> Path:
     payload = {
         "model_version": MODEL_VERSION,
         "phase": phase,
@@ -213,7 +217,37 @@ def save_checkpoint(path: Path,
         "rng_state": capture_rng_state(),
         "saved_at_unix": time.time(),
     }
-    torch.save(payload, path)
+    target = unique_checkpoint_path(path, iteration) if path.exists() else path
+    if target != path:
+        print(
+            f"[checkpoint] target exists, wrote fallback {target.name}",
+            flush=True,
+        )
+    torch.save(payload, target)
+    return target
+
+
+def unique_checkpoint_path(path: Path, iteration: int) -> Path:
+    stamp = int(time.time())
+    candidate = path.with_name(f"{path.stem}_iter{iteration:05d}_{stamp}{path.suffix}")
+    idx = 1
+    while candidate.exists():
+        candidate = path.with_name(
+            f"{path.stem}_iter{iteration:05d}_{stamp}_{idx}{path.suffix}"
+        )
+        idx += 1
+    return candidate
+
+
+def cleanup_old_best_checkpoints(run_cfg: Config, keep_name: str) -> None:
+    pattern = f"pinns_v{MODEL_VERSION}_ep*_loss*.pth"
+    for path in run_cfg.training.checkpoint_dir.glob(pattern):
+        if path.name == keep_name:
+            continue
+        try:
+            path.unlink()
+        except OSError:
+            pass
 
 
 def load_checkpoint(path: Path,
@@ -255,18 +289,13 @@ def save_best_and_latest(model: PINNSolidification,
                          log: dict[str, float],
                          optimizer: torch.optim.Optimizer | None,
                          scheduler: torch.optim.lr_scheduler.LRScheduler | None,
-                         optimizer_name: str | None) -> float:
-    latest = checkpoint_path(run_cfg, run_cfg.training.latest_checkpoint)
-    save_checkpoint(
-        latest, model, run_cfg, phase, iteration, best_loss, log,
-        optimizer=optimizer, scheduler=scheduler, optimizer_name=optimizer_name,
-    )
-
+                         optimizer_name: str | None,
+                         save_latest: bool = False) -> float:
     total = log["total"]
     if math.isfinite(total) and total < best_loss:
         best_loss = total
         best_name = f"pinns_v{MODEL_VERSION}_ep{iteration:05d}_loss{total:.4e}.pth"
-        save_checkpoint(
+        best_path = save_checkpoint(
             checkpoint_path(run_cfg, best_name),
             model,
             run_cfg,
@@ -278,7 +307,15 @@ def save_best_and_latest(model: PINNSolidification,
             scheduler=scheduler,
             optimizer_name=optimizer_name,
         )
-        update_best_models_md(run_cfg, best_name, total, iteration, phase)
+        cleanup_old_best_checkpoints(run_cfg, best_path.name)
+        update_best_models_md(run_cfg, best_path.name, total, iteration, phase)
+
+    if save_latest:
+        latest = checkpoint_path(run_cfg, run_cfg.training.latest_checkpoint)
+        save_checkpoint(
+            latest, model, run_cfg, phase, iteration, best_loss, log,
+            optimizer=optimizer, scheduler=scheduler, optimizer_name=optimizer_name,
+        )
     return best_loss
 
 
@@ -350,6 +387,13 @@ def should_plot(iteration: int, run_cfg: Config) -> bool:
     return run_cfg.training.plot_every > 0 and iteration % run_cfg.training.plot_every == 0
 
 
+def should_checkpoint(iteration: int, run_cfg: Config) -> bool:
+    return iteration == 1 or (
+        run_cfg.training.checkpoint_every > 0
+        and iteration % run_cfg.training.checkpoint_every == 0
+    )
+
+
 def check_log_is_finite(log: dict[str, float], phase: str, iteration: int) -> None:
     bad = {k: v for k, v in log.items() if not math.isfinite(v)}
     if bad:
@@ -393,6 +437,11 @@ def run_phase1(model: PINNSolidification,
         best_loss = save_best_and_latest(
             model, run_cfg, "phase1", iteration, best_loss, log,
             optimizer=optimizer, scheduler=None, optimizer_name="Adam",
+            save_latest=(
+                should_checkpoint(iteration, run_cfg)
+                or iteration == end_iter
+                or log["total"] < run_cfg.training.loss_target
+            ),
         )
         if log["total"] < run_cfg.training.loss_target:
             print(f"[stop] target loss reached in phase1 at iter {iteration}", flush=True)
@@ -452,6 +501,11 @@ def run_phase2(model: PINNSolidification,
         best_loss = save_best_and_latest(
             model, run_cfg, "phase2", iteration, best_loss, log,
             optimizer=optimizer, scheduler=scheduler, optimizer_name="Adam",
+            save_latest=(
+                should_checkpoint(iteration, run_cfg)
+                or iteration == phase2_end
+                or log["total"] < run_cfg.training.loss_target
+            ),
         )
         if log["total"] < run_cfg.training.loss_target:
             print(f"[stop] target loss reached in phase2 at iter {iteration}", flush=True)
@@ -521,6 +575,11 @@ def run_phase3(model: PINNSolidification,
         best_loss = save_best_and_latest(
             model, run_cfg, "phase3", iteration, best_loss, log,
             optimizer=optimizer, scheduler=None, optimizer_name="LBFGS",
+            save_latest=(
+                should_checkpoint(iteration, run_cfg)
+                or iteration == phase3_end
+                or log["total"] < run_cfg.training.loss_target
+            ),
         )
         if log["total"] < run_cfg.training.loss_target:
             print(f"[stop] target loss reached in phase3 at iter {iteration}", flush=True)
