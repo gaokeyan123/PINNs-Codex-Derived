@@ -1,6 +1,6 @@
 # PROJECT STATE
 > **Auto-maintained by Claude.** Updated at every milestone or model logic change.  
-> Last updated: 2026-04-29 | Phase: **6 - Training Stabilization / Validation** In Progress
+> Last updated: 2026-04-30 | Phase: **6 - Training Stabilization / Validation** In Progress
 
 ---
 
@@ -49,6 +49,8 @@ Completed sub-tasks:
 - [x] `train.py` - three-phase training loop, smoke mode, checkpoint/resume, CSV logging
 - [x] `postprocess.py` - dense-grid plots, residual maps, optional MATLAB interface overlay
 - [x] Smoke verification: `python train.py --smoke`, resume from `checkpoints/latest.pth`, and small-grid `postprocess.py`
+- [x] Added `diagnose_residuals.py` raw residual RMS diagnostics and ran it on the iter 800 reduced-case checkpoint
+- [x] Added and ran `train_no_phase.py` clean-pipe no-phase diagnostic to separate phase-change coupling from momentum/energy residuals
 - [ ] Active fix: reduced CPU case showed a nonphysical localized interface collapse and high full-physics loss; training stabilization is underway before MATLAB validation.
 
 ---
@@ -101,6 +103,72 @@ Implementation notes:
 - Checkpoints include model, optimizer, scheduler, phase, iteration, best loss, config snapshot, and RNG state.
 - `postprocess.py` produces PINN-only plots without MATLAB data and overlays MATLAB interface data when `outputs/matlab_ref.mat` is available.
 
+### 3.4 Current End-to-End PINN Structure
+
+```mermaid
+flowchart TD
+    A["Collocation coordinates\n(r, x, t)"] --> B["Normalize inputs\nr/r_w, x/L, t/t_end"]
+
+    B --> C1["3D Fourier encoding\ninput: (r_n, x_n, t_n)\n256 random features -> 512 channels"]
+    C1 --> D1["Shared field trunk\n8 x Linear(128) + tanh"]
+    D1 --> E1["Field head\nLinear(128 -> 5)"]
+    E1 --> F1["u_r, u_x, p\nlinear outputs"]
+    E1 --> F2["Theta_f, Theta_dep\nsigmoid outputs"]
+
+    B --> C2["2D Fourier encoding\ninput: (x_n, t_n)\n256 random features -> 512 channels"]
+    C2 --> D2["Interface trunk\n4 x Linear(128) + tanh"]
+    D2 --> E2["Interface head\nLinear(128 -> 1) + sigmoid"]
+    E2 --> F3["r_int(x,t) in [0, r_w]"]
+
+    F3 --> G["Smooth Heaviside H_epsilon(r, r_int)\nepsilon = 0.02\nr_int detached for interior PDE blend"]
+    F1 --> H["Autograd derivatives\nfirst and second derivatives wrt r,x,t"]
+    F2 --> H
+    F3 --> H
+    G --> H
+
+    H --> I["Interior PDE residuals\nmass, mom_x, mom_r,\nenergy_fluid, energy_dep"]
+    H --> J["Interface residuals\nStefan, T continuity,\nr_int time monotonicity,\nr_int downstream monotonicity,\nr_int smoothness"]
+    H --> K["Boundary and initial residuals\nwall, inlet, outlet, axis, IC"]
+
+    I --> L["Weighted MSE loss terms"]
+    J --> L
+    K --> L
+    L --> M["Total loss"]
+    M --> N["Backpropagation\nAdam / L-BFGS"]
+```
+
+**Forward inputs.**
+- The model receives pointwise non-dimensional coordinates $(r,x,t)$.
+- Before Fourier encoding, the network scales them internally to $(r/r_w,\ x/L,\ t/t_{end})$.
+- Autograd still differentiates with respect to the original coordinate tensors used by the residual functions.
+
+**Field branch.**
+- Uses all three normalized coordinates $(r_n,x_n,t_n)$.
+- Random Fourier encoding maps 3 inputs to 512 encoded channels.
+- A shared MLP trunk with 8 hidden layers and 128 tanh units predicts the field state.
+- The field head outputs $(u_r,u_x,p,\Theta_f,\Theta_{dep})$.
+- $u_r$, $u_x$, and $p$ are linear outputs; $\Theta_f$ and $\Theta_{dep}$ pass through sigmoid bounds.
+
+**Interface branch.**
+- Uses only $(x_n,t_n)$, not $r_n$, so the learned interface is physically $r_{int}(x,t)$.
+- A separate 2D Fourier encoder feeds a 4-layer tanh trunk.
+- The interface head outputs $r_{int}$ through `sigmoid * r_w`, keeping it inside $[0,r_w]$.
+
+**Region handling.**
+- A smooth Heaviside function $H_\epsilon(r,r_{int})$ marks fluid/deposit regions.
+- In the interior PDE residuals, $r_{int}$ is detached inside $H_\epsilon$ so interior PDE blending does not create an unwanted shortcut into the interface head.
+
+**Loss assembly.**
+- Interior collocation points enforce mass, momentum, and energy equations.
+- Interface points enforce Stefan balance, temperature continuity, monotone solidification, downstream front monotonicity, and axial smoothness.
+- Boundary and initial points enforce wall, inlet, outlet, axis, and clean-pipe initial conditions.
+- Each residual group becomes a weighted MSE term; the total loss is the sum of all active terms.
+
+**Training flow.**
+- Phase 1 uses BC/IC only, so the network first learns the known inlet/wall/axis/outlet/initial states.
+- Phase 2 enables all PDE and interface losses with Adam and cosine learning-rate decay.
+- Phase 3 optionally refines the full-physics solution with L-BFGS.
+
 ---
 
 ## 4. Key Technical Decisions Log
@@ -131,6 +199,14 @@ Implementation notes:
 | 2026-04-29 | Network v1.1 normalizes coordinates before Fourier encoding | The previous v1.0 interface saw x on $[0,5]$ but r,t on $[0,1]$, creating excess high-frequency axial oscillation |
 | 2026-04-29 | Corrected Stefan residual scaling to $\dot r_{int}=\text{Ste}\,\Delta q$ | The old form used $\text{Ste}\,\dot r_{int}=\Delta q$, making Ste=0.1 move the interface about 100x too fast |
 | 2026-04-29 | Made checkpoint write failures non-fatal and reduced best-checkpoint write frequency | OneDrive/disk pressure caused checkpoint writes to fail and interrupt training; source code should not be lost because an artifact write fails |
+| 2026-04-30 | Added raw residual RMS diagnostic script and ran it on the iter 800 reduced-case checkpoint | The weighted loss alone hid the source of the error; diagnostics showed near-axis radial momentum spikes dominate the weighted loss, while fluid energy is the next largest broad residual |
+| 2026-04-30 | Added clean-pipe no-phase diagnostic trainer with $H=0$ and interface losses disabled | Constant-temperature no-phase runs show the same near-axis residual pathology, so the immediate blocker is axis regularity/sampling rather than Stefan or interface coupling |
+| 2026-04-30 | Tested the mild axis treatment: exclude only interior PDE points with $r<0.01$ while keeping axis BC points | The no-phase clean-pipe residuals became well conditioned: after 1000 iters, fresh RMS values were $R_{mom,x}=1.34$, $R_{mom,r}=0.634$, $R_E=0.263$, and $R_{mass}=0.213$ |
+| 2026-04-30 | Ran a 2000-iter no-phase clean-pipe case and generated field/residual plots | Fresh residuals improved to $R_{mom,x}=0.820$, $R_{mom,r}=0.359$, $R_E=0.118$, and $R_{mass}=0.155$; temperature is nearly constant, but the velocity field still needs refinement before returning to the full phase-change case |
+| 2026-04-30 | Continued the no-phase run to iter 10000 with a target fresh RMS of $10^{-3}$ | Target was not reached: energy converged to $R_E=0.00192$, but momentum remained at $R_{mom,x}=0.278$, $R_{mom,r}=0.0804$; this points to axial momentum/pressure conditioning rather than insufficient phase-change handling |
+| 2026-04-30 | Installed CUDA-enabled PyTorch in Python 3.12 and verified GPU execution without source-code changes | CUDA run used the same no-phase equations and scripts; after 500 GPU Adam steps from iter 10000, fresh residuals were $R_{mom,x}=0.248$, $R_{mom,r}=0.192$, $R_E=0.00127$, and $R_{mass}=0.0785$ |
+| 2026-04-30 | Ran a long CUDA no-phase continuation to iter 30500 with larger collocation counts | Target $10^{-3}$ was not reached, but residuals improved to $R_{mass}=0.0538$, $R_{mom,x}=0.0495$, $R_{mom,r}=0.0318$, and $R_E=3.67\times10^{-5}$; plain Adam still plateaus above the desired momentum accuracy |
+| 2026-04-30 | Continued the same CUDA no-phase case to iter 80500 with unchanged equations/code | Target $10^{-3}$ was still not reached. Fresh residuals were $R_{mom,x}=1.78\times10^{-2}$, $R_{mom,r}=1.32\times10^{-2}$, $R_{mass}=4.53\times10^{-3}$, and $R_E=8.70\times10^{-6}$. Postprocess plots show constant $\Theta_f=1$, near-Poiseuille $u_x$ with max 1.9996, very small $u_r$, and a smooth pressure drop. Accumulated active training time from the initial no-phase checkpoint to iter 80500 was about 2 h 9 min, excluding conversation gaps/postprocessing |
 
 ---
 

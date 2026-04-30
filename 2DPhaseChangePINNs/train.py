@@ -74,6 +74,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--n-interface", type=int, default=None)
     parser.add_argument("--n-boundary", type=int, default=None)
     parser.add_argument("--n-ic", type=int, default=None)
+    parser.add_argument("--r-min-interior", type=float, default=None)
     parser.add_argument("--target-solid-thickness", type=float, default=None)
     parser.add_argument("--target-thickness-mode", choices=("max", "mean", "min"), default="mean")
     parser.add_argument("--target-time", type=float, default=None)
@@ -142,6 +143,8 @@ def apply_cli_overrides(base: Config, args: argparse.Namespace) -> Config:
         run_cfg.sampling.N_boundary = args.n_boundary
     if args.n_ic is not None:
         run_cfg.sampling.N_ic = args.n_ic
+    if args.r_min_interior is not None:
+        run_cfg.sampling.r_min_interior = args.r_min_interior
 
     if args.smoke:
         run_cfg.sampling.N_interior = 32

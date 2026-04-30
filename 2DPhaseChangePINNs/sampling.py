@@ -92,7 +92,12 @@ def sample_interior(N: int, cfg: Config, seed: int = 0) -> dict:
     is active at each point — no hard domain splitting is needed here.
     """
     s = _lhs(N, 3, seed)                    # [N, 3] in (0,1)
-    r = s[:, 0] * cfg.case.r_w
+    r_min = max(0.0, float(cfg.sampling.r_min_interior))
+    if r_min >= cfg.case.r_w:
+        raise ValueError(
+            f"cfg.sampling.r_min_interior must be smaller than r_w={cfg.case.r_w}"
+        )
+    r = r_min + s[:, 0] * (cfg.case.r_w - r_min)
     x = s[:, 1] * cfg.case.L
     t = s[:, 2] * cfg.case.t_end
     return _pack(r, x, t)
@@ -180,12 +185,13 @@ def sample_interface(model, N: int, cfg: Config, seed: int = 0) -> dict:
     Called once at startup and then every cfg.sampling.resample_every iters
     via resample_interface() to track the evolving interface shape.
     """
-    s = _lhs(N, 2, seed)
+    device = next(model.parameters()).device
+    s = _lhs(N, 2, seed).to(device)
     x_samp = s[:, 0] * cfg.case.L
     t_samp = s[:, 1] * cfg.case.t_end
 
     with torch.no_grad():
-        r_dummy = torch.zeros(N)
+        r_dummy = torch.zeros(N, device=device)
         out      = model(r_dummy, x_samp, t_samp)
         r_int    = out["r_int"].detach().clamp(0.0, cfg.case.r_w)
 

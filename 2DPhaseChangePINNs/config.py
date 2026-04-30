@@ -50,6 +50,7 @@ class SamplingConfig:
     N_interface: int = 5_000
     N_boundary: int = 2_000    # per boundary (wall, inlet, outlet)
     N_ic: int = 5_000
+    r_min_interior: float = 0.01  # exclude singular near-axis PDE points; axis BC remains active
     resample_every: int = 500  # iters between interface point resampling
 
 
