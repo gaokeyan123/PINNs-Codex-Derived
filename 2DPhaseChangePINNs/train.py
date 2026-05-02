@@ -68,6 +68,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--phase1-iters", type=int, default=None)
     parser.add_argument("--phase2-iters", type=int, default=None)
     parser.add_argument("--phase3-iters", type=int, default=None)
+    parser.add_argument("--phase1-lr", type=float, default=None)
+    parser.add_argument("--phase2-lr-start", type=float, default=None)
+    parser.add_argument("--phase2-lr-end", type=float, default=None)
     parser.add_argument("--plot-every", type=int, default=None)
     parser.add_argument("--checkpoint-every", type=int, default=None)
     parser.add_argument("--n-interior", type=int, default=None)
@@ -75,6 +78,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--n-boundary", type=int, default=None)
     parser.add_argument("--n-ic", type=int, default=None)
     parser.add_argument("--r-min-interior", type=float, default=None)
+    parser.add_argument("--resample-all-every", type=int, default=None)
     parser.add_argument("--target-solid-thickness", type=float, default=None)
     parser.add_argument("--target-thickness-mode", choices=("max", "mean", "min"), default="mean")
     parser.add_argument("--target-time", type=float, default=None)
@@ -82,6 +86,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target-check-every", type=int, default=None)
     parser.add_argument("--target-min-iter", type=int, default=0)
     parser.add_argument("--resume", type=Path, default=None)
+    parser.add_argument("--resume-weights-only", action="store_true")
     parser.add_argument("--smoke", action="store_true", help="Run a tiny end-to-end verification job.")
     return parser.parse_args()
 
@@ -131,6 +136,12 @@ def apply_cli_overrides(base: Config, args: argparse.Namespace) -> Config:
         run_cfg.training.phase2_iters = args.phase2_iters
     if args.phase3_iters is not None:
         run_cfg.training.phase3_iters = args.phase3_iters
+    if args.phase1_lr is not None:
+        run_cfg.training.phase1_lr = args.phase1_lr
+    if args.phase2_lr_start is not None:
+        run_cfg.training.phase2_lr_start = args.phase2_lr_start
+    if args.phase2_lr_end is not None:
+        run_cfg.training.phase2_lr_end = args.phase2_lr_end
     if args.plot_every is not None:
         run_cfg.training.plot_every = args.plot_every
     if args.checkpoint_every is not None:
@@ -145,6 +156,8 @@ def apply_cli_overrides(base: Config, args: argparse.Namespace) -> Config:
         run_cfg.sampling.N_ic = args.n_ic
     if args.r_min_interior is not None:
         run_cfg.sampling.r_min_interior = args.r_min_interior
+    if args.resample_all_every is not None:
+        run_cfg.sampling.resample_all_every = args.resample_all_every
 
     if args.smoke:
         run_cfg.sampling.N_interior = 32
@@ -152,6 +165,7 @@ def apply_cli_overrides(base: Config, args: argparse.Namespace) -> Config:
         run_cfg.sampling.N_boundary = 12
         run_cfg.sampling.N_ic = 16
         run_cfg.sampling.resample_every = 2
+        run_cfg.sampling.resample_all_every = 2
         run_cfg.training.phase1_iters = 2 if args.phase1_iters is None else args.phase1_iters
         run_cfg.training.phase2_iters = 4 if args.phase2_iters is None else args.phase2_iters
         run_cfg.training.phase3_iters = 1 if args.phase3_iters is None else args.phase3_iters
@@ -214,14 +228,20 @@ def capture_rng_state() -> dict[str, Any]:
 def restore_rng_state(state: dict[str, Any] | None) -> None:
     if not state:
         return
+
+    def _cpu_byte_tensor(value: Any) -> torch.Tensor:
+        if isinstance(value, torch.Tensor):
+            return value.detach().cpu().to(torch.uint8)
+        return torch.tensor(value, dtype=torch.uint8)
+
     if "python" in state:
         random.setstate(state["python"])
     if "numpy" in state:
         np.random.set_state(state["numpy"])
     if "torch" in state:
-        torch.set_rng_state(state["torch"])
+        torch.set_rng_state(_cpu_byte_tensor(state["torch"]))
     if "cuda" in state and torch.cuda.is_available():
-        torch.cuda.set_rng_state_all(state["cuda"])
+        torch.cuda.set_rng_state_all([_cpu_byte_tensor(s) for s in state["cuda"]])
 
 
 def save_checkpoint(path: Path,
@@ -233,7 +253,8 @@ def save_checkpoint(path: Path,
                     log: dict[str, float],
                     optimizer: torch.optim.Optimizer | None = None,
                     scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
-                    optimizer_name: str | None = None) -> Path | None:
+                    optimizer_name: str | None = None,
+                    overwrite: bool = False) -> Path | None:
     payload = {
         "model_version": MODEL_VERSION,
         "phase": phase,
@@ -248,14 +269,19 @@ def save_checkpoint(path: Path,
         "rng_state": capture_rng_state(),
         "saved_at_unix": time.time(),
     }
-    target = unique_checkpoint_path(path, iteration) if path.exists() else path
+    target = path if overwrite or not path.exists() else unique_checkpoint_path(path, iteration)
     if target != path:
         print(
             f"[checkpoint] target exists, wrote fallback {target.name}",
             flush=True,
         )
     try:
-        torch.save(payload, target)
+        if overwrite:
+            tmp = path.with_name(f".{path.name}.tmp")
+            torch.save(payload, tmp)
+            tmp.replace(path)
+        else:
+            torch.save(payload, target)
         return target
     except (OSError, RuntimeError) as exc:
         print(f"[checkpoint] skipped {target.name}: {exc}", flush=True)
@@ -353,6 +379,7 @@ def save_best_and_latest(model: PINNSolidification,
         save_checkpoint(
             latest, model, run_cfg, phase, iteration, best_loss, log,
             optimizer=optimizer, scheduler=scheduler, optimizer_name=optimizer_name,
+            overwrite=True,
         )
     return best_loss
 
@@ -523,6 +550,13 @@ def run_phase1(model: PINNSolidification,
     write_header = not csv_path.exists() or csv_path.stat().st_size == 0
 
     for iteration in range(start_iter + 1, end_iter + 1):
+        if (
+            run_cfg.sampling.resample_all_every > 0
+            and iteration > start_iter + 1
+            and iteration % run_cfg.sampling.resample_all_every == 0
+        ):
+            batch = build_training_batch(model, run_cfg, run_cfg.seed + iteration, device)
+
         model.train()
         optimizer.zero_grad(set_to_none=True)
         loss, log = compute_loss(model, batch, run_cfg, physics_on=False)
@@ -572,7 +606,7 @@ def run_phase2(model: PINNSolidification,
     first_iter = max(start_iter + 1, phase1_end + 1)
     if start_iter <= phase1_end:
         best_loss = float("inf")
-    phase2_steps = max(phase2_end - phase1_end, 1)
+    phase2_steps = max(phase2_end - first_iter + 1, 1)
     optimizer = torch.optim.Adam(model.parameters(), lr=run_cfg.training.phase2_lr_start)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
@@ -589,7 +623,13 @@ def run_phase2(model: PINNSolidification,
     write_header = not csv_path.exists() or csv_path.stat().st_size == 0
 
     for iteration in range(first_iter, phase2_end + 1):
-        if (iteration - phase1_end) == 1 or iteration % run_cfg.sampling.resample_every == 0:
+        if (
+            run_cfg.sampling.resample_all_every > 0
+            and iteration > first_iter
+            and iteration % run_cfg.sampling.resample_all_every == 0
+        ):
+            batch = build_training_batch(model, run_cfg, run_cfg.seed + iteration, device)
+        elif (iteration - phase1_end) == 1 or iteration % run_cfg.sampling.resample_every == 0:
             replace_interface_points(batch, model, run_cfg, run_cfg.seed + iteration, device)
 
         model.train()
@@ -657,7 +697,13 @@ def run_phase3(model: PINNSolidification,
     write_header = not csv_path.exists() or csv_path.stat().st_size == 0
 
     for iteration in range(first_iter, phase3_end + 1):
-        if (iteration - phase2_end) == 1 or iteration % run_cfg.sampling.resample_every == 0:
+        if (
+            run_cfg.sampling.resample_all_every > 0
+            and iteration > first_iter
+            and iteration % run_cfg.sampling.resample_all_every == 0
+        ):
+            batch = build_training_batch(model, run_cfg, run_cfg.seed + iteration, device)
+        elif (iteration - phase2_end) == 1 or iteration % run_cfg.sampling.resample_every == 0:
             replace_interface_points(batch, model, run_cfg, run_cfg.seed + iteration, device)
 
         closure_log: dict[str, float] = {}
@@ -747,6 +793,11 @@ def main() -> None:
         start_iter = int(resume_payload.get("iteration", 0))
         best_loss = float(resume_payload.get("best_loss", best_loss))
         print(f"[resume] loaded {args.resume} at iter {start_iter}", flush=True)
+        if args.resume_weights_only:
+            resume_payload["phase"] = None
+            resume_payload["optimizer_state"] = None
+            resume_payload["scheduler_state"] = None
+            print("[resume] using checkpoint weights only; optimizer/scheduler reset", flush=True)
 
     csv_path = run_cfg.output_dir / "loss_history.csv"
     t0 = time.time()

@@ -52,6 +52,7 @@ class SamplingConfig:
     N_ic: int = 5_000
     r_min_interior: float = 0.01  # exclude singular near-axis PDE points; axis BC remains active
     resample_every: int = 500  # iters between interface point resampling
+    resample_all_every: int = 100  # iters between full collocation resampling; 0 disables
 
 
 @dataclass

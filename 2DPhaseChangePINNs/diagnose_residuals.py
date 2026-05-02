@@ -22,7 +22,7 @@ from equations import compute_all_residuals
 from losses import compute_loss_terms
 from network import PINNSolidification
 from sampling import build_batch
-from train import choose_device, load_checkpoint, move_batch
+from train import choose_device, move_batch
 
 
 GROUP_RESIDUALS = {
@@ -164,7 +164,9 @@ def main() -> None:
     apply_sampling_overrides(run_cfg, args)
 
     model = PINNSolidification(run_cfg.network, run_cfg.case, seed=run_cfg.seed).to(device)
-    payload = load_checkpoint(args.checkpoint, model, device)
+    payload = torch.load(args.checkpoint, map_location=device, weights_only=False)
+    state = payload.get("model_state", payload.get("model_state_dict", payload))
+    model.load_state_dict(state)
     model.eval()
 
     batch = move_batch(build_batch(model, run_cfg, seed=args.seed), device)

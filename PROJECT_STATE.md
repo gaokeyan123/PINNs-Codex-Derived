@@ -1,6 +1,6 @@
 # PROJECT STATE
 > **Auto-maintained by Claude.** Updated at every milestone or model logic change.  
-> Last updated: 2026-04-30 | Phase: **6 - Training Stabilization / Validation** In Progress
+> Last updated: 2026-05-02 | Phase: **6 - Training Stabilization / Validation** In Progress
 
 ---
 
@@ -167,6 +167,7 @@ flowchart TD
 **Training flow.**
 - Phase 1 uses BC/IC only, so the network first learns the known inlet/wall/axis/outlet/initial states.
 - Phase 2 enables all PDE and interface losses with Adam and cosine learning-rate decay.
+- Phase 2 now periodically resamples the full collocation batch, not only interface points, to prevent fixed-batch PDE overfitting.
 - Phase 3 optionally refines the full-physics solution with L-BFGS.
 
 ---
@@ -207,6 +208,7 @@ flowchart TD
 | 2026-04-30 | Installed CUDA-enabled PyTorch in Python 3.12 and verified GPU execution without source-code changes | CUDA run used the same no-phase equations and scripts; after 500 GPU Adam steps from iter 10000, fresh residuals were $R_{mom,x}=0.248$, $R_{mom,r}=0.192$, $R_E=0.00127$, and $R_{mass}=0.0785$ |
 | 2026-04-30 | Ran a long CUDA no-phase continuation to iter 30500 with larger collocation counts | Target $10^{-3}$ was not reached, but residuals improved to $R_{mass}=0.0538$, $R_{mom,x}=0.0495$, $R_{mom,r}=0.0318$, and $R_E=3.67\times10^{-5}$; plain Adam still plateaus above the desired momentum accuracy |
 | 2026-04-30 | Continued the same CUDA no-phase case to iter 80500 with unchanged equations/code | Target $10^{-3}$ was still not reached. Fresh residuals were $R_{mom,x}=1.78\times10^{-2}$, $R_{mom,r}=1.32\times10^{-2}$, $R_{mass}=4.53\times10^{-3}$, and $R_E=8.70\times10^{-6}$. Postprocess plots show constant $\Theta_f=1$, near-Poiseuille $u_x$ with max 1.9996, very small $u_r$, and a smooth pressure drop. Accumulated active training time from the initial no-phase checkpoint to iter 80500 was about 2 h 9 min, excluding conversation gaps/postprocessing |
+| 2026-05-02 | Added full collocation resampling, lower-LR weight-only resume, LR CLI overrides, and robust latest-checkpoint overwrite | The first phase-change rerun with interface-only resampling had fresh weighted loss $3.90\times10^2$ at iter 6000 because fixed interior PDE points hid energy residual spikes. Full-batch resampling reduced fresh weighted loss to $6.89\times10^{-1}$ at iter 12000; lower-LR larger-batch refinement reduced it further to $3.32\times10^{-1}$ at iter 50000. The remaining largest terms are BC/IC, $T$ continuity, and fluid energy, while Stefan/momentum are small |
 
 ---
 
