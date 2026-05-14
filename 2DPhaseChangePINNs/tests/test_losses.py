@@ -88,7 +88,8 @@ def test_loss_terms_keys_physics_on(model, batch):
     residuals = compute_all_residuals(model, batch, cfg)
     terms = compute_loss_terms(residuals, cfg.weights, physics_on=True)
     expected = {"mass", "mom_x", "mom_r", "energy_fluid", "energy_dep",
-                "stefan", "T_cont", "rint_mono", "rint_x_mono", "rint_smooth", "bc_ic"}
+                "stefan", "T_cont", "interface_vel",
+                "rint_mono", "rint_x_mono", "bc_ic"}
     assert set(terms.keys()) == expected
 
 
@@ -97,7 +98,8 @@ def test_loss_terms_keys_physics_off(model, batch):
     residuals = _compute_bc_ic_residuals(model, batch, cfg)
     terms = compute_loss_terms(residuals, cfg.weights, physics_on=False)
     expected = {"mass", "mom_x", "mom_r", "energy_fluid", "energy_dep",
-                "stefan", "T_cont", "rint_mono", "rint_x_mono", "rint_smooth", "bc_ic"}
+                "stefan", "T_cont", "interface_vel",
+                "rint_mono", "rint_x_mono", "bc_ic"}
     assert set(terms.keys()) == expected
 
 
@@ -106,7 +108,8 @@ def test_physics_off_placeholder_zeros(model, batch):
     residuals = _compute_bc_ic_residuals(model, batch, cfg)
     terms = compute_loss_terms(residuals, cfg.weights, physics_on=False)
     for k in ("mass", "mom_x", "mom_r", "energy_fluid", "energy_dep",
-              "stefan", "T_cont", "rint_mono", "rint_x_mono", "rint_smooth"):
+              "stefan", "T_cont", "interface_vel",
+              "rint_mono", "rint_x_mono"):
         assert terms[k].item() == pytest.approx(0.0), \
             f"{k} should be zero placeholder when physics_on=False"
 
@@ -219,7 +222,8 @@ def test_phase2_backward_gradients_flow_to_params(model):
 def test_compute_loss_log_keys(loss_phase2):
     _, log = loss_phase2
     expected = {"mass", "mom_x", "mom_r", "energy_fluid", "energy_dep",
-                "stefan", "T_cont", "rint_mono", "rint_x_mono", "rint_smooth", "bc_ic", "total"}
+                "stefan", "T_cont", "interface_vel",
+                "rint_mono", "rint_x_mono", "bc_ic", "total"}
     assert set(log.keys()) == expected
 
 

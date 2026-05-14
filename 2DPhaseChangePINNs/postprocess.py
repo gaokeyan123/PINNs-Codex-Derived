@@ -19,7 +19,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from config import cfg, Config
+from config import cfg, Config, config_from_dict
 from equations import (
     res_energy_dep,
     res_energy_fluid,
@@ -34,7 +34,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Plot trained PINN fields and residual maps.")
     parser.add_argument("--checkpoint", type=Path, default=cfg.training.checkpoint_dir / "latest.pth")
     parser.add_argument("--matlab-ref", type=Path, default=cfg.output_dir / "matlab_ref.mat")
-    parser.add_argument("--times", type=str, default="0.25,0.5,0.75,1.0")
+    parser.add_argument("--times", type=str, default="0.2,0.4,0.6,0.8")
     parser.add_argument("--grid-nx", type=int, default=200)
     parser.add_argument("--grid-nr", type=int, default=200)
     parser.add_argument("--output-dir", type=Path, default=cfg.output_dir)
@@ -59,15 +59,22 @@ def parse_times(text: str) -> list[float]:
     return values
 
 
-def load_model(checkpoint: Path, run_cfg: Config, device: torch.device) -> PINNSolidification:
+def load_model(checkpoint: Path,
+               fallback_cfg: Config,
+               device: torch.device) -> tuple[PINNSolidification, Config]:
     if not checkpoint.exists():
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint}")
     payload = torch.load(checkpoint, map_location=device, weights_only=False)
+    if isinstance(payload, dict) and isinstance(payload.get("config"), dict):
+        run_cfg = config_from_dict(payload["config"], fallback=fallback_cfg)
+    else:
+        print("[postprocess] checkpoint has no saved config; using current config.py")
+        run_cfg = fallback_cfg
     state = payload.get("model_state", payload.get("model_state_dict", payload))
     model = PINNSolidification(run_cfg.network, run_cfg.case, seed=run_cfg.seed).to(device)
     model.load_state_dict(state)
     model.eval()
-    return model
+    return model, run_cfg
 
 
 def make_grid(run_cfg: Config,
@@ -202,6 +209,33 @@ def plot_interface_profiles(field_by_time: dict[float, dict[str, np.ndarray]],
     plt.close(fig)
 
 
+def plot_thickness_profiles(field_by_time: dict[float, dict[str, np.ndarray]],
+                            run_cfg: Config,
+                            matlab_ref: dict[str, Any] | None,
+                            output_dir: Path) -> None:
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    for t_value, fields in field_by_time.items():
+        thickness = run_cfg.case.r_w - fields["r_int"]
+        ax.plot(fields["x_line"], thickness, lw=2, label=f"PINN t={t_value:g}")
+        ref_line = select_reference_interface(matlab_ref, t_value)
+        if ref_line is not None:
+            ax.plot(
+                ref_line[0],
+                run_cfg.case.r_w - ref_line[1],
+                "--",
+                lw=1.5,
+                label=f"MATLAB t={t_value:g}",
+            )
+    ax.set_xlabel("x_hat")
+    ax.set_ylabel("r_w - r_int")
+    ax.set_ylim(bottom=0.0)
+    ax.set_title("Nondimensional deposit thickness")
+    ax.legend(fontsize=8, ncol=2)
+    fig.tight_layout()
+    fig.savefig(output_dir / "thickness_profiles.png", dpi=180)
+    plt.close(fig)
+
+
 def plot_field_snapshots(t_value: float,
                          fields: dict[str, np.ndarray],
                          output_dir: Path) -> None:
@@ -245,7 +279,11 @@ def compute_residual_map(model: PINNSolidification,
                          grid_nx: int,
                          t_value: float,
                          device: torch.device) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    rr, xx, tt = make_grid(run_cfg, grid_nr, grid_nx, t_value, device)
+    r_min = max(0.0, min(float(run_cfg.sampling.r_min_interior), run_cfg.case.r_w))
+    r = torch.linspace(r_min, run_cfg.case.r_w, grid_nr, device=device)
+    x = torch.linspace(0.0, run_cfg.case.L, grid_nx, device=device)
+    rr, xx = torch.meshgrid(r, x, indexing="ij")
+    tt = torch.full_like(rr, t_value)
     r = rr.reshape(-1).detach().requires_grad_(True)
     x = xx.reshape(-1).detach().requires_grad_(True)
     t = tt.reshape(-1).detach().requires_grad_(True)
@@ -317,25 +355,26 @@ def main() -> None:
     device = choose_device(args.device)
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    model = load_model(args.checkpoint, cfg, device)
+    model, run_cfg = load_model(args.checkpoint, cfg, device)
     matlab_ref = load_matlab_reference(args.matlab_ref)
     print(
         f"[postprocess] checkpoint={args.checkpoint} device={device} "
-        f"grid={args.grid_nr}x{args.grid_nx}",
+        f"grid={args.grid_nr}x{args.grid_nx} case={run_cfg.case.name}",
         flush=True,
     )
 
     field_by_time: dict[float, dict[str, np.ndarray]] = {}
     for t_value in times:
-        fields = evaluate_fields(model, cfg, args.grid_nr, args.grid_nx, t_value, device)
+        fields = evaluate_fields(model, run_cfg, args.grid_nr, args.grid_nx, t_value, device)
         field_by_time[t_value] = fields
         plot_field_snapshots(t_value, fields, args.output_dir)
         rr, xx, residual_norm = compute_residual_map(
-            model, cfg, args.grid_nr, args.grid_nx, t_value, device
+            model, run_cfg, args.grid_nr, args.grid_nx, t_value, device
         )
         plot_residual_map(t_value, rr, xx, residual_norm, fields, args.output_dir)
 
     plot_interface_profiles(field_by_time, matlab_ref, args.output_dir)
+    plot_thickness_profiles(field_by_time, run_cfg, matlab_ref, args.output_dir)
     plot_pressure_profiles(field_by_time, args.output_dir)
     summarize_matlab_error(field_by_time, matlab_ref, args.output_dir)
     print(f"[postprocess] plots saved to {args.output_dir}", flush=True)

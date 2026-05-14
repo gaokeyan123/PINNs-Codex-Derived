@@ -1,6 +1,6 @@
 # PROJECT STATE
 > **Auto-maintained by Claude.** Updated at every milestone or model logic change.  
-> Last updated: 2026-05-02 | Phase: **6 - Training Stabilization / Validation** In Progress
+> Last updated: 2026-05-14 | Phase: **6 - Sharp-Interface Verification Cases** In Progress
 
 ---
 
@@ -18,7 +18,21 @@ This project develops a PINN-based surrogate model to replace conventional CFD (
 - Deposit (solid) energy equation (pure diffusion)
 - Stefan condition at the moving solid–liquid interface $r_\text{int}(x,t)$
 
-**Benchmark / simple test case:**
+**Active verification case: `20260410_nonDimm_goodmatchCaseC`**
+| Parameter | Value |
+|---|---|
+| Peclet number Pe | 14.3 |
+| Stefan number Ste | 0.06275 |
+| Reynolds number Re | 1.53 |
+| Conductivity ratio | $k_{dep}/k_f=1.0$ |
+| Geometry | $r_a=0$, $r_w=1$, $L=10.25$ (non-dim) |
+| Dimensional temperatures | $T_{in}=5 C$, $T_{int}=0 C$, $T_w=-5 C$ |
+| Non-dimensional temperatures | $\Theta_{in}=2$, $\Theta_{solidus}=1$, $\Theta_w=0$ |
+| Wall BC | $\Theta_w=\Theta_{in}=2$ for $0\le x\le0.25$, then $\Theta_w=0$ downstream |
+| IC | Clean pipe, $r_{int}=1$, $\Theta_f=2$ |
+| End time | $\hat{t}=0.8$ |
+
+**Previous benchmark / simple test case:**
 | Parameter | Value |
 |---|---|
 | Péclet number Pe | 1.0 |
@@ -34,7 +48,7 @@ This project develops a PINN-based surrogate model to replace conventional CFD (
 
 ## 2. Current Phase
 
-**Phase 6 - Training Stabilization / Validation**
+**Phase 6 - Sharp-Interface Verification Cases**
 Status: In Progress
 
 Completed sub-tasks:
@@ -45,13 +59,17 @@ Completed sub-tasks:
 - [x] `network.py` — Fourier-encoded MLP with field + interface heads
 - [x] `equations.py` — autograd PDE residuals (R1–R7 + all BCs/ICs)
 - [x] `sampling.py` — Latin Hypercube interior, adaptive interface, boundary/IC samplers, plot_batch
-- [x] `losses.py` — 8 named weighted terms, Phase 1 fast path, compute_loss, format_loss_line, log_to_csv
+- [x] `losses.py` — named weighted terms, Phase 1 fast path, compute_loss, format_loss_line, log_to_csv
 - [x] `train.py` - three-phase training loop, smoke mode, checkpoint/resume, CSV logging
 - [x] `postprocess.py` - dense-grid plots, residual maps, optional MATLAB interface overlay
 - [x] Smoke verification: `python train.py --smoke`, resume from `checkpoints/latest.pth`, and small-grid `postprocess.py`
 - [x] Added `diagnose_residuals.py` raw residual RMS diagnostics and ran it on the iter 800 reduced-case checkpoint
 - [x] Added and ran `train_no_phase.py` clean-pipe no-phase diagnostic to separate phase-change coupling from momentum/energy residuals
-- [ ] Active fix: reduced CPU case showed a nonphysical localized interface collapse and high full-physics loss; training stabilization is underway before MATLAB validation.
+- [x] Created branch `codex/sharp-interface-verification` from sharp-interface commit `a18a6cd`
+- [x] Added verification case `20260410_nonDimm_goodmatchCaseC` to `config.py`
+- [x] Smoke verified training path and direct `latest.pth` checkpoint saving for the verification case
+- [x] Added `SHARP_INTERFACE_EQUATIONS.md` with the implemented nondimensional PDEs, interface conditions, BC/ICs, and loss weights
+- [ ] Run bounded/full verification training against supplied MATLAB/sample cases.
 
 ---
 
@@ -64,9 +82,9 @@ Completed sub-tasks:
 | Input | $(r, x, t)$, internally scaled to $(r/r_w, x/L, t/t_{end})$ | Keeps Fourier features on comparable coordinate ranges while autograd still differentiates w.r.t. physical non-dimensional coordinates |
 | Fourier encoding | $\sigma=1.0$, 256 features | Overcomes spectral bias near interface |
 | Shared trunk | 8 × 128, tanh | Tanh preferred over ReLU for smooth second derivatives needed by PDE residuals |
-| Field head | → $(u_r, u_x, p, \Theta_f, \Theta_{dep})$ | Linear outputs except $\Theta$ use sigmoid |
+| Field head | → $(u_r, u_x, p, \Theta_f, \Theta_{dep})$ | Linear outputs except $\Theta$ use sigmoid scaled to the active case temperature range |
 | Interface head | Input masked to $(x, t)$ → $r_{int}$ | Sigmoid output scaled to $(0,1)$ |
-| Total params | ~130k | Small enough for CPU training, fast on GPU |
+| Total params | ~297k | Small enough for smoke checks, intended production runs on GPU |
 
 **Decision log:**
 - Single-network with two heads chosen over two separate networks (fluid + solid) to avoid discontinuous gradients at the interface during backpropagation.
@@ -83,9 +101,9 @@ Completed sub-tasks:
 | $\mathcal{L}_5$ | Deposit energy | 1 | Interior collocation |
 | $\mathcal{L}_6$ | Stefan condition | 10 | Interface points $\mathcal{P}_\Gamma$ |
 | $\mathcal{L}_7$ | $T$ continuity at interface | 100 | Interface points |
+| $\mathcal{L}_{u,\Gamma}$ | No-slip velocity at interface, $u_x=u_r=0$ | 10 | Interface points |
 | $\mathcal{L}_{r,t}$ | Monotone interface motion, penalize $\partial r_{int}/\partial t > 0$ | 10 | Interface points |
 | $\mathcal{L}_{r,x}$ | Monotone downstream interface, penalize $\partial r_{int}/\partial x > 0$ | 10 | Interface points |
-| $\mathcal{L}_{r,xx}$ | Smooth interface curvature, $\partial^2 r_{int}/\partial x^2$ | 1 | Interface points |
 | $\mathcal{L}_8$ | All BCs + IC, including inlet $r_{int}(0,t)=r_w$ | 100 | Boundary/initial points |
 
 **Collocation counts:** 20k interior, 5k interface (resampled every 500 iters), 2k per boundary, 5k IC.
@@ -113,7 +131,7 @@ flowchart TD
     C1 --> D1["Shared field trunk\n8 x Linear(128) + tanh"]
     D1 --> E1["Field head\nLinear(128 -> 5)"]
     E1 --> F1["u_r, u_x, p\nlinear outputs"]
-    E1 --> F2["Theta_f, Theta_dep\nsigmoid outputs"]
+    E1 --> F2["Theta_f, Theta_dep\nscaled sigmoid outputs"]
 
     B --> C2["2D Fourier encoding\ninput: (x_n, t_n)\n256 random features -> 512 channels"]
     C2 --> D2["Interface trunk\n4 x Linear(128) + tanh"]
@@ -127,7 +145,7 @@ flowchart TD
     G --> H
 
     H --> I["Interior PDE residuals\nmass, mom_x, mom_r,\nenergy_fluid, energy_dep"]
-    H --> J["Interface residuals\nStefan, T continuity,\nr_int time monotonicity,\nr_int downstream monotonicity,\nr_int smoothness"]
+    H --> J["Interface residuals\nStefan, T continuity,\nr_int time monotonicity,\nr_int downstream monotonicity"]
     H --> K["Boundary and initial residuals\nwall, inlet, outlet, axis, IC"]
 
     I --> L["Weighted MSE loss terms"]
@@ -147,7 +165,7 @@ flowchart TD
 - Random Fourier encoding maps 3 inputs to 512 encoded channels.
 - A shared MLP trunk with 8 hidden layers and 128 tanh units predicts the field state.
 - The field head outputs $(u_r,u_x,p,\Theta_f,\Theta_{dep})$.
-- $u_r$, $u_x$, and $p$ are linear outputs; $\Theta_f$ and $\Theta_{dep}$ pass through sigmoid bounds.
+- $u_r$, $u_x$, and $p$ are linear outputs; $\Theta_f$ and $\Theta_{dep}$ pass through sigmoid bounds scaled to the active case temperature range.
 
 **Interface branch.**
 - Uses only $(x_n,t_n)$, not $r_n$, so the learned interface is physically $r_{int}(x,t)$.
@@ -160,7 +178,7 @@ flowchart TD
 
 **Loss assembly.**
 - Interior collocation points enforce mass, momentum, and energy equations.
-- Interface points enforce Stefan balance, temperature continuity, monotone solidification, downstream front monotonicity, and axial smoothness.
+- Interface points enforce Stefan balance, temperature continuity, interface no-slip velocity, monotone solidification, and downstream front monotonicity.
 - Boundary and initial points enforce wall, inlet, outlet, axis, and clean-pipe initial conditions.
 - Each residual group becomes a weighted MSE term; the total loss is the sum of all active terms.
 
@@ -190,7 +208,7 @@ flowchart TD
 | 2026-04-29 | sample_interface detaches r_int and re-wraps with requires_grad | Prevents stale computation graph references across training iterations |
 | 2026-04-29 | resample_interface uses advancing seed each call | Ensures fresh (x,t) pairs every resample step; same seed → reproducible |
 | 2026-04-29 | Phase 1 fast path `_compute_bc_ic_residuals` skips Laplacians | No second-order autograd in pre-train → ~10× faster per step |
-| 2026-04-29 | 15 BC/IC residuals averaged before applying `w_bc_ic` weight | Prevents large-N BC sets from dominating; each sub-term contributes equally |
+| 2026-04-29 | 16 BC/IC residuals averaged before applying `w_bc_ic` weight | Prevents large-N BC sets from dominating; each sub-term contributes equally |
 | 2026-04-29 | R7 (T_cont) averages fluid + deposit continuity, ×0.5 | Both must be satisfied symmetrically; prevents double-counting |
 | 2026-04-29 | `log_to_csv` appends rows with `write_header` flag | Single function used throughout training; header written once at iter 0 |
 | 2026-04-29 | Added three-phase `train.py` with smoke mode and full resume checkpoints | Enables careful CPU verification locally while preserving 50k-iteration production defaults |
@@ -209,6 +227,14 @@ flowchart TD
 | 2026-04-30 | Ran a long CUDA no-phase continuation to iter 30500 with larger collocation counts | Target $10^{-3}$ was not reached, but residuals improved to $R_{mass}=0.0538$, $R_{mom,x}=0.0495$, $R_{mom,r}=0.0318$, and $R_E=3.67\times10^{-5}$; plain Adam still plateaus above the desired momentum accuracy |
 | 2026-04-30 | Continued the same CUDA no-phase case to iter 80500 with unchanged equations/code | Target $10^{-3}$ was still not reached. Fresh residuals were $R_{mom,x}=1.78\times10^{-2}$, $R_{mom,r}=1.32\times10^{-2}$, $R_{mass}=4.53\times10^{-3}$, and $R_E=8.70\times10^{-6}$. Postprocess plots show constant $\Theta_f=1$, near-Poiseuille $u_x$ with max 1.9996, very small $u_r$, and a smooth pressure drop. Accumulated active training time from the initial no-phase checkpoint to iter 80500 was about 2 h 9 min, excluding conversation gaps/postprocessing |
 | 2026-05-02 | Added full collocation resampling, lower-LR weight-only resume, LR CLI overrides, and robust latest-checkpoint overwrite | The first phase-change rerun with interface-only resampling had fresh weighted loss $3.90\times10^2$ at iter 6000 because fixed interior PDE points hid energy residual spikes. Full-batch resampling reduced fresh weighted loss to $6.89\times10^{-1}$ at iter 12000; lower-LR larger-batch refinement reduced it further to $3.32\times10^{-1}$ at iter 50000. The remaining largest terms are BC/IC, $T$ continuity, and fluid energy, while Stefan/momentum are small |
+| 2026-05-12 | Updated verification-case temperature scale to $\Theta=(T-T_w)/(T_{int}-T_w)$ and scaled temperature heads by the active case temperature maximum | The active case has $\Theta_{in}=2$, $\Theta_{solidus}=1$, and $\Theta_w=0$; unscaled sigmoid temperature outputs capped at 1 could not satisfy the inlet and IC |
+| 2026-05-12 | Added postprocess deposit-thickness plot `thickness_profiles.png` | Verification needs direct plots of nondimensional thickness $r_w-r_{int}$ versus nondimensional $x$ at $t=0.2,0.4,0.6,0.8$ |
+| 2026-05-12 | Removed the interface axial-curvature loss $\mathcal{L}_{r,xx}$ | The verification branch now keeps the governing equations plus the interface time/downstream monotonicity penalties, without penalizing $\partial^2 r_{int}/\partial x^2$ |
+| 2026-05-12 | Extended the verification geometry to $L=10.25$ and added a hot-wall inlet section over $0\le x\le0.25$ | This represents the upstream non-deposition segment: the wall uses $\Theta_w=\Theta_{in}$ there and remains cold downstream |
+| 2026-05-14 | TODO: test staged differentiable $T_{cont}\rightarrow r_{int}$ coupling | Current detached interface sampling makes $T_{cont}$ train $\Theta_f$ and $\Theta_{dep}$ at sampled interface points, but not the interface head in the same backward pass. Future work should test allowing the existing temperature-continuity condition to backprop through $r_{int}(x,t)$ after the temperature field is stable; this is not a new physics equation. |
+| 2026-05-14 | Added interface no-slip velocity loss $\mathcal{L}_{u,\Gamma}$ | The previous sharp-interface loss enforced no-slip only at the outer wall. Once deposit exists, the fluid boundary is $r_{int}(x,t)$, so the full-physics loss now also penalizes $u_x$ and $u_r$ at the sampled interface points. |
+| 2026-05-14 | Checkpoint-aware diagnostics/postprocess and best-checkpoint metadata fix | `postprocess.py` and `diagnose_residuals.py` now rebuild the run config from the checkpoint payload, residual maps use the same `r_min_interior` as training, and best checkpoints store the actual new best loss immediately when saved. |
+| 2026-05-14 | Added zero-derivative guard in `_grad` | Higher-order derivatives of constant tensors now return zero instead of depending on PyTorch-version-specific autograd behavior. This preserves the mathematical derivative and makes derivative tests robust. |
 
 ---
 

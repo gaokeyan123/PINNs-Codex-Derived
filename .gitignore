@@ -19,6 +19,10 @@ env/
 # ── Jupyter ────────────────────────────────────────────────────────────────────
 .ipynb_checkpoints/
 *.ipynb
+.pytest_cache/
+2DPhaseChangePINNs/.pytest_cache/
+2DPhaseChangePINNs/pytest_tmp/
+2DPhaseChangePINNs/pytest-cache-files-*/
 
 # ── Model weights — GITIGNORED to prevent repo bloat ─────────────────────────
 # Naming convention: pinns_v{MAJOR}.{MINOR}_ep{EPOCH:05d}_loss{VAL:.4e}.pth
@@ -27,9 +31,13 @@ env/
 2DPhaseChangePINNs/checkpoints/*.pth
 2DPhaseChangePINNs/checkpoints/**/*.pth
 2DPhaseChangePINNs/checkpoints/.*.tmp-*
+2DPhaseChangePINNs/checkpoints/**/*.tmp*
+2DPhaseChangePINNs/checkpoints/**/.*.tmp*
+2DPhaseChangePINNs/checkpoints/*/
 2DPhaseChangePINNs/checkpoints/**/BEST_MODELS.md
 
 # ── Large outputs (figures / numpy dumps) ─────────────────────────────────────
+2DPhaseChangePINNs/outputs/
 2DPhaseChangePINNs/outputs/*.npy
 2DPhaseChangePINNs/outputs/*.npz
 2DPhaseChangePINNs/outputs/*.png

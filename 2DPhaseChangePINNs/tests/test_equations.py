@@ -14,7 +14,8 @@ from equations import (
     res_mass, res_mom_x, res_mom_r,
     res_energy_fluid, res_energy_dep,
     res_stefan, res_T_continuity,
-    res_rint_monotonic, res_rint_x_monotonic, res_rint_smoothness,
+    res_interface_velocity_bc,
+    res_rint_monotonic, res_rint_x_monotonic,
     res_wall_bc, res_inlet_bc, res_outlet_bc, res_axis_bc, res_ic,
     compute_all_residuals,
 )
@@ -210,17 +211,21 @@ def test_T_continuity_shape_no_nan(model):
     assert not torch.isnan(R7a).any() and not torch.isnan(R7b).any()
 
 
+def test_interface_velocity_bc_shape_no_nan(model):
+    out, r, x, t = _fwd_with_H(model, _pts())
+    R_ux, R_ur = res_interface_velocity_bc(out)
+    assert R_ux.shape == (N_SMALL,) and R_ur.shape == (N_SMALL,)
+    assert not torch.isnan(R_ux).any() and not torch.isnan(R_ur).any()
+
+
 def test_rint_regularizers_shape_no_nan(model):
     out, r, x, t = _fwd_with_H(model, _pts())
     R_mono = res_rint_monotonic(out, t)
     R_x_mono = res_rint_x_monotonic(out, x)
-    R_smooth = res_rint_smoothness(out, x)
     assert R_mono.shape == (N_SMALL,)
     assert R_x_mono.shape == (N_SMALL,)
-    assert R_smooth.shape == (N_SMALL,)
     assert not torch.isnan(R_mono).any()
     assert not torch.isnan(R_x_mono).any()
-    assert not torch.isnan(R_smooth).any()
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -228,11 +233,20 @@ def test_rint_regularizers_shape_no_nan(model):
 # ─────────────────────────────────────────────────────────────────────────
 
 def test_wall_bc_Theta_dep_at_cold_wall(model):
-    """If network perfectly predicts Θ_dep = Θ_wall, R_wall_T should be 0."""
-    pts = _pts(N_SMALL, r_val=cfg.case.r_w)
+    """If network predicts cold-wall temperature downstream, R_wall_T should be 0."""
+    pts = _pts(N_SMALL, r_val=cfg.case.r_w, x_val=cfg.case.hot_wall_length + 1.0)
     out, r, x, t = _fwd_with_H(model, pts)
     out["Theta_dep"] = torch.full((N_SMALL,), cfg.case.Theta_wall)
-    R_T, _, _ = res_wall_bc(out, cfg.case)
+    R_T, _, _ = res_wall_bc(out, x, cfg.case)
+    torch.testing.assert_close(R_T, torch.zeros_like(R_T), atol=1e-6, rtol=0)
+
+
+def test_wall_bc_Theta_dep_at_hot_upstream_wall(model):
+    """If network predicts inlet temperature on the hot upstream wall, R_wall_T should be 0."""
+    pts = _pts(N_SMALL, r_val=cfg.case.r_w, x_val=0.5 * cfg.case.hot_wall_length)
+    out, r, x, t = _fwd_with_H(model, pts)
+    out["Theta_dep"] = torch.full((N_SMALL,), cfg.case.Theta_in)
+    R_T, _, _ = res_wall_bc(out, x, cfg.case)
     torch.testing.assert_close(R_T, torch.zeros_like(R_T), atol=1e-6, rtol=0)
 
 
@@ -279,7 +293,8 @@ def test_compute_all_residuals_keys(model):
     expected = {
         "mass", "mom_x", "mom_r", "energy_fluid", "energy_dep",
         "stefan", "T_cont_fluid", "T_cont_dep",
-        "rint_mono", "rint_x_mono", "rint_smooth",
+        "interface_u_x", "interface_u_r",
+        "rint_mono", "rint_x_mono",
         "bc_wall_T", "bc_wall_ur", "bc_wall_ux",
         "bc_inlet_T", "bc_inlet_ux", "bc_inlet_ur", "bc_inlet_rint",
         "bc_outlet_Tf", "bc_outlet_ux",

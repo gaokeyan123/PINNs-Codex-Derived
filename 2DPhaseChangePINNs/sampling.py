@@ -190,6 +190,10 @@ def sample_interface(model, N: int, cfg: Config, seed: int = 0) -> dict:
     x_samp = s[:, 0] * cfg.case.L
     t_samp = s[:, 1] * cfg.case.t_end
 
+    # TODO: Test a staged differentiable T_cont path later.  Current interface
+    # sampling intentionally freezes r_int coordinates, so T_cont trains the
+    # temperature fields at the sampled interface but does not directly update
+    # the interface head in the same backward pass.
     with torch.no_grad():
         r_dummy = torch.zeros(N, device=device)
         out      = model(r_dummy, x_samp, t_samp)

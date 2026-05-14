@@ -17,7 +17,7 @@ from typing import Any
 
 import torch
 
-from config import Config, cfg
+from config import Config, config_from_dict
 from equations import compute_all_residuals
 from losses import compute_loss_terms
 from network import PINNSolidification
@@ -33,9 +33,9 @@ GROUP_RESIDUALS = {
     "energy_dep": ["energy_dep"],
     "stefan": ["stefan"],
     "T_cont": ["T_cont_fluid", "T_cont_dep"],
+    "interface_vel": ["interface_u_x", "interface_u_r"],
     "rint_mono": ["rint_mono"],
     "rint_x_mono": ["rint_x_mono"],
-    "rint_smooth": ["rint_smooth"],
     "bc_ic": [
         "bc_wall_T",
         "bc_wall_ur",
@@ -160,11 +160,15 @@ def print_table(title: str,
 def main() -> None:
     args = parse_args()
     device = choose_device(args.device)
-    run_cfg = Config()
+    payload = torch.load(args.checkpoint, map_location=device, weights_only=False)
+    if isinstance(payload, dict) and isinstance(payload.get("config"), dict):
+        run_cfg = config_from_dict(payload["config"], fallback=Config())
+    else:
+        print("[diagnose] checkpoint has no saved config; using current config.py")
+        run_cfg = Config()
     apply_sampling_overrides(run_cfg, args)
 
     model = PINNSolidification(run_cfg.network, run_cfg.case, seed=run_cfg.seed).to(device)
-    payload = torch.load(args.checkpoint, map_location=device, weights_only=False)
     state = payload.get("model_state", payload.get("model_state_dict", payload))
     model.load_state_dict(state)
     model.eval()

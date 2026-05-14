@@ -24,6 +24,10 @@ Non-dimensional groups used
   k_ratio = k_dep / k_f                 (conductivity ratio)
 """
 
+# Active verification branch note:
+# The case `20260410_nonDimm_goodmatchCaseC` uses
+# Theta = (T - T_wall) / (T_interface - T_wall), giving
+# Theta_in = 2, Theta_solidus = 1, and Theta_wall = 0.
 import torch
 from config import CaseConfig, Config
 
@@ -44,6 +48,8 @@ def _grad(y: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
     allow_unused=True returns zeros instead of raising when x does not appear
     in the computation graph (e.g. interface head masked to (x,t) so ∂/∂r = 0).
     """
+    if not y.requires_grad:
+        return torch.zeros_like(x)
     g = torch.autograd.grad(
         y, x,
         grad_outputs=torch.ones_like(y),
@@ -77,6 +83,16 @@ def _poiseuille(r: torch.Tensor, r_int: torch.Tensor) -> torch.Tensor:
     """
     ri_safe = torch.clamp(r_int, min=_R_MIN)
     return 2.0 * (1.0 - (r / ri_safe) ** 2)
+
+
+def _wall_temperature(x: torch.Tensor, cfg: CaseConfig) -> torch.Tensor:
+    """Piecewise wall temperature for the upstream non-deposition section."""
+    x_hot = torch.as_tensor(cfg.hot_wall_length, dtype=x.dtype, device=x.device)
+    return torch.where(
+        x <= x_hot,
+        torch.full_like(x, cfg.Theta_in),
+        torch.full_like(x, cfg.Theta_wall),
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -283,6 +299,17 @@ def res_T_continuity(out: dict,
     return R7a, R7b
 
 
+def res_interface_velocity_bc(out: dict) -> tuple[torch.Tensor, torch.Tensor]:
+    """No-slip velocity condition at the stationary deposit interface.
+
+    The sharp-interface model treats the deposit as attached to the wall.
+    At r = r_int(x,t), the liquid velocity should match the stationary
+    solid deposit surface:
+        u_x = 0,  u_r = 0.
+    """
+    return out["u_x"], out["u_r"]
+
+
 def res_rint_monotonic(out: dict, t: torch.Tensor) -> torch.Tensor:
     """Penalize interface radius growth in time.
 
@@ -291,12 +318,6 @@ def res_rint_monotonic(out: dict, t: torch.Tensor) -> torch.Tensor:
     """
     drint_dt = _grad(out["r_int"], t)
     return torch.relu(drint_dt)
-
-
-def res_rint_smoothness(out: dict, x: torch.Tensor) -> torch.Tensor:
-    """Penalize sharp axial curvature in the learned interface."""
-    drint_dx = _grad(out["r_int"], x)
-    return _grad(drint_dx, x)
 
 
 def res_rint_x_monotonic(out: dict, x: torch.Tensor) -> torch.Tensor:
@@ -314,6 +335,7 @@ def res_rint_x_monotonic(out: dict, x: torch.Tensor) -> torch.Tensor:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def res_wall_bc(out: dict,
+                x: torch.Tensor,
                 cfg: CaseConfig) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Wall BC at r̂ = r̂_w = 1  (cold, no-slip).
 
@@ -321,7 +343,7 @@ def res_wall_bc(out: dict,
     û_r   = 0       (no-slip, radial)
     û_x   = 0       (no-slip, axial)
     """
-    R_T  = out["Theta_dep"] - cfg.Theta_wall
+    R_T  = out["Theta_dep"] - _wall_temperature(x, cfg)
     R_ur = out["u_r"]
     R_ux = out["u_x"]
     return R_T, R_ur, R_ux
@@ -454,13 +476,15 @@ def compute_all_residuals(model,
     R7a, R7b = res_T_continuity(out, case)
     results["T_cont_fluid"] = R7a
     results["T_cont_dep"]   = R7b
+    R_ivx, R_ivr = res_interface_velocity_bc(out)
+    results["interface_u_x"] = R_ivx
+    results["interface_u_r"] = R_ivr
     results["rint_mono"]    = res_rint_monotonic(out, t)
     results["rint_x_mono"]  = res_rint_x_monotonic(out, x)
-    results["rint_smooth"]  = res_rint_smoothness(out, x)
 
     # ── Wall BC ───────────────────────────────────────────────────────────
     out, r, x, t = _fwd(batch["wall"])
-    R_wT, R_wur, R_wux = res_wall_bc(out, case)
+    R_wT, R_wur, R_wux = res_wall_bc(out, x, case)
     results["bc_wall_T"]    = R_wT
     results["bc_wall_ur"]   = R_wur
     results["bc_wall_ux"]   = R_wux

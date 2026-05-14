@@ -11,10 +11,10 @@ Architecture
       └─ physics_on=True   (Phase 2 + 3 full training)
               └─ equations.compute_all_residuals()   ← includes Laplacians
 
-Both paths feed into compute_loss_terms() → 8 named scalar MSE terms,
+Both paths feed into compute_loss_terms() → named scalar MSE terms,
 then total_loss() weights and sums them.
 
-The 8 loss groups and their default weights (from config.LossWeights):
+The full-physics loss groups and their default weights (from config.LossWeights):
 ──────────────────────────────────────────────────────────────────────
   L_mass         w = 1     R1: incompressible continuity
   L_mom_x        w = 1     R2: axial momentum
@@ -22,8 +22,9 @@ The 8 loss groups and their default weights (from config.LossWeights):
   L_energy_fluid w = 1     R4: fluid energy (advection-diffusion)
   L_energy_dep   w = 1     R5: deposit energy (pure diffusion)
   L_stefan       w = 10    R6: Stefan condition (latent heat balance)
-  L_T_cont       w = 10    R7: temperature continuity at interface
-  L_bc_ic        w = 100   All 15 BC + IC residuals averaged
+  L_T_cont       w = 100   R7: temperature continuity at interface
+  L_interface_vel w = 10   No-slip velocity at the moving interface
+  L_bc_ic        w = 100   All 16 BC + IC residuals averaged
 
 Rationale for weights:
   Physics terms are soft constraints — large residuals across the whole
@@ -35,7 +36,7 @@ Rationale for weights:
 
 Phase 1 fast path:
   During BC/IC pre-training (phase=1) we skip all second-derivative
-  Laplacian computations (~10× cheaper per step).  Only the 15 BC/IC
+  Laplacian computations (~10× cheaper per step).  Only the 16 BC/IC
   residuals are evaluated.  physics_on=False signals this path.
 """
 
@@ -63,7 +64,7 @@ def mse(residual: torch.Tensor) -> torch.Tensor:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _compute_bc_ic_residuals(model, batch: dict, cfg: Config) -> dict:
-    """Compute only the 15 BC + IC residuals (no Laplacians, no Stefan).
+    """Compute only the 16 BC + IC residuals (no Laplacians, no Stefan).
 
     Used in Phase 1 pre-training.  Avoids all second-order autograd,
     cutting cost roughly 10× vs compute_all_residuals().
@@ -85,7 +86,7 @@ def _compute_bc_ic_residuals(model, batch: dict, cfg: Config) -> dict:
 
     # Wall BC
     out, r, x, t = _fwd(batch["wall"])
-    R_wT, R_wur, R_wux = res_wall_bc(out, case)
+    R_wT, R_wur, R_wux = res_wall_bc(out, x, case)
     results["bc_wall_T"]    = R_wT
     results["bc_wall_ur"]   = R_wur
     results["bc_wall_ux"]   = R_wux
@@ -123,7 +124,7 @@ def _compute_bc_ic_residuals(model, batch: dict, cfg: Config) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 4.1  Loss-term computation — 23 residuals → 8 named scalars
+# 4.1  Loss-term computation — residual tensors → named scalars
 # ═══════════════════════════════════════════════════════════════════════════
 
 # BC/IC residual keys — averaged together into a single L_bc_ic term
@@ -139,7 +140,7 @@ _BC_IC_KEYS = [
 def compute_loss_terms(residuals: dict,
                        weights: LossWeights,
                        physics_on: bool = True) -> dict[str, torch.Tensor]:
-    """Map the residual dict to 8 named, weighted scalar loss terms.
+    """Map the residual dict to named, weighted scalar loss terms.
 
     Parameters
     ----------
@@ -149,8 +150,8 @@ def compute_loss_terms(residuals: dict,
 
     Returns
     -------
-    dict of 8 scalar tensors (still in the computation graph for backward()).
-    Keys: mass, mom_x, mom_r, energy_fluid, energy_dep, stefan, T_cont, bc_ic.
+    dict of scalar tensors (still in the computation graph for backward()).
+    Keys include mass, mom_x, mom_r, energy terms, interface terms, and bc_ic.
     """
     terms: dict[str, torch.Tensor] = {}
 
@@ -168,17 +169,20 @@ def compute_loss_terms(residuals: dict,
         terms["T_cont"]  = weights.T_continuity * (
             mse(residuals["T_cont_fluid"]) + mse(residuals["T_cont_dep"])
         ) * 0.5
+        terms["interface_vel"] = weights.interface_velocity * (
+            mse(residuals["interface_u_x"]) + mse(residuals["interface_u_r"])
+        ) * 0.5
         terms["rint_mono"] = weights.rint_mono * mse(residuals["rint_mono"])
         terms["rint_x_mono"] = weights.rint_x_mono * mse(residuals["rint_x_mono"])
-        terms["rint_smooth"] = weights.rint_smooth * mse(residuals["rint_smooth"])
     else:
         # Physics terms get zero scalar placeholders for logging consistency
         zero = torch.tensor(0.0)
         for k in ("mass", "mom_x", "mom_r", "energy_fluid", "energy_dep",
-                  "stefan", "T_cont", "rint_mono", "rint_x_mono", "rint_smooth"):
+                  "stefan", "T_cont", "interface_vel",
+                  "rint_mono", "rint_x_mono"):
             terms[k] = zero
 
-    # ── BC + IC residuals (averaged over all 15 sub-terms) ───────────────
+    # ── BC + IC residuals (averaged over all 16 sub-terms) ───────────────
     present = [k for k in _BC_IC_KEYS if k in residuals]
     bc_ic_mean = sum(mse(residuals[k]) for k in present) / len(present)
     terms["bc_ic"] = weights.bc_ic * bc_ic_mean
@@ -225,7 +229,7 @@ def compute_loss(model,
     -------
     loss   : scalar tensor with grad_fn (call .backward() on this)
     log    : dict[str, float] — detached values of all 9 terms
-             (8 named terms + "total") for CSV / console logging.
+             (named terms + "total") for CSV / console logging.
              Values are the weighted contributions, not raw MSEs.
     """
     # Step 1 — compute residuals
@@ -272,11 +276,13 @@ def format_loss_line(log: dict[str, float], iteration: int,
         phys_str   = f"phys {phys:.2e}"
         stefan_str = f"stefan {log.get('stefan', 0):.2e}"
         Tcont_str  = f"T_cont {log.get('T_cont', 0):.2e}"
+        intv_str   = f"int_vel {log.get('interface_vel', 0):.2e}"
         rint_str   = (
-            f"rint {(log.get('rint_mono', 0) + log.get('rint_x_mono', 0) + log.get('rint_smooth', 0)):.2e}"
+            f"rint {(log.get('rint_mono', 0) + log.get('rint_x_mono', 0)):.2e}"
         )
         return (f"iter {iteration:5d} | {total_str} | {bc_ic_str} | "
-                f"{phys_str} | {stefan_str} | {Tcont_str} | {rint_str}")
+                f"{phys_str} | {stefan_str} | {Tcont_str} | "
+                f"{intv_str} | {rint_str}")
     else:
         return (f"iter {iteration:5d} | {total_str} | {bc_ic_str}"
                 f"  [BC/IC only]")
