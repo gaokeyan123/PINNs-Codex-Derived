@@ -39,6 +39,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--grid-nr", type=int, default=200)
     parser.add_argument("--output-dir", type=Path, default=cfg.output_dir)
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
+    parser.add_argument("--skip-residual-maps", action="store_true",
+                        help="Skip expensive PDE residual contour maps.")
     return parser.parse_args()
 
 
@@ -368,10 +370,11 @@ def main() -> None:
         fields = evaluate_fields(model, run_cfg, args.grid_nr, args.grid_nx, t_value, device)
         field_by_time[t_value] = fields
         plot_field_snapshots(t_value, fields, args.output_dir)
-        rr, xx, residual_norm = compute_residual_map(
-            model, run_cfg, args.grid_nr, args.grid_nx, t_value, device
-        )
-        plot_residual_map(t_value, rr, xx, residual_norm, fields, args.output_dir)
+        if not args.skip_residual_maps:
+            rr, xx, residual_norm = compute_residual_map(
+                model, run_cfg, args.grid_nr, args.grid_nx, t_value, device
+            )
+            plot_residual_map(t_value, rr, xx, residual_norm, fields, args.output_dir)
 
     plot_interface_profiles(field_by_time, matlab_ref, args.output_dir)
     plot_thickness_profiles(field_by_time, run_cfg, matlab_ref, args.output_dir)

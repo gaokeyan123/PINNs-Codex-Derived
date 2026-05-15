@@ -13,10 +13,10 @@ ROOT = Path(__file__).parent
 @dataclass
 class CaseConfig:
     """Non-dimensional physical parameters for the simple test case."""
-    name: str = "20260410_nonDimm_goodmatchCaseC"
+    name: str = "20260410_nonDimm_goodmatchCaseB"
 
     Pe: float = 1.43e1     # Peclet number:  rho_f Cp_f U r_w / k_f
-    Ste: float = 0.06275   # Stefan number:  Cp_f dT / L_f
+    Ste: float = 0.06275   # Stefan number:  Cp_f (T_int - T_wall) / L_f
     Re: float = 1.53       # Reynolds number (laminar)
     k_ratio: float = 1.0   # k_dep / k_f  (equal conductivities, simplest case)
 

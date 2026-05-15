@@ -1,7 +1,7 @@
 # Sharp-Interface PINN Equations
 
 This file records the nondimensional governing equations currently implemented
-in the sharp-interface PINN branch for case `20260410_nonDimm_goodmatchCaseC`.
+in the sharp-interface PINN branch for case `20260410_nonDimm_goodmatchCaseB`.
 
 ## Nondimensional Variables
 
@@ -9,6 +9,12 @@ The temperature scale is
 
 $$
 \Theta = \frac{T - T_w}{T_{int} - T_w}.
+$$
+
+The Stefan number uses the same temperature scale:
+
+$$
+Ste = \frac{C_{p,f}(T_{int}-T_w)}{L_f}.
 $$
 
 For the active verification case,

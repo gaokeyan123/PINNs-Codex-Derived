@@ -18,7 +18,7 @@ This project develops a PINN-based surrogate model to replace conventional CFD (
 - Deposit (solid) energy equation (pure diffusion)
 - Stefan condition at the moving solid–liquid interface $r_\text{int}(x,t)$
 
-**Active verification case: `20260410_nonDimm_goodmatchCaseC`**
+**Active verification case: `20260410_nonDimm_goodmatchCaseB`**
 | Parameter | Value |
 |---|---|
 | Peclet number Pe | 14.3 |
@@ -66,7 +66,7 @@ Completed sub-tasks:
 - [x] Added `diagnose_residuals.py` raw residual RMS diagnostics and ran it on the iter 800 reduced-case checkpoint
 - [x] Added and ran `train_no_phase.py` clean-pipe no-phase diagnostic to separate phase-change coupling from momentum/energy residuals
 - [x] Created branch `codex/sharp-interface-verification` from sharp-interface commit `a18a6cd`
-- [x] Added verification case `20260410_nonDimm_goodmatchCaseC` to `config.py`
+- [x] Added verification case `20260410_nonDimm_goodmatchCaseB` to `config.py`
 - [x] Smoke verified training path and direct `latest.pth` checkpoint saving for the verification case
 - [x] Added `SHARP_INTERFACE_EQUATIONS.md` with the implemented nondimensional PDEs, interface conditions, BC/ICs, and loss weights
 - [ ] Run bounded/full verification training against supplied MATLAB/sample cases.

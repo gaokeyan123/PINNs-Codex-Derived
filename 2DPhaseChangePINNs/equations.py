@@ -13,19 +13,19 @@ Non-dimensional variables
 ─────────────────────────
   r̂ = r / r_w        x̂ = x / r_w        t̂ = t · α_f / r_w²
   û = u / U_in        p̂ = p / (ρ_f U_in²)
-  Θ = (T − T_w) / (T_in − T_w)  ∈ [0, 1]
+  Θ = (T − T_w) / (T_int − T_w)
   r̂_int ∈ (0, 1]    (interface position, non-dim)
 
 Non-dimensional groups used
 ────────────────────────────
   Pe  = ρ_f Cp_f U_in r_w / k_f        (Péclet)
   Re  = U_in r_w / ν                    (Reynolds, radius-based)
-  Ste = Cp_f (T_in − T_w) / L_f        (Stefan)
+  Ste = Cp_f (T_int − T_w) / L_f       (Stefan)
   k_ratio = k_dep / k_f                 (conductivity ratio)
 """
 
 # Active verification branch note:
-# The case `20260410_nonDimm_goodmatchCaseC` uses
+# The case `20260410_nonDimm_goodmatchCaseB` uses
 # Theta = (T - T_wall) / (T_interface - T_wall), giving
 # Theta_in = 2, Theta_solidus = 1, and Theta_wall = 0.
 import torch
