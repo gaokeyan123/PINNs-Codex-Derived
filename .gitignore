@@ -60,3 +60,13 @@ desktop.ini
 .vscode/
 .idea/
 *.swp
+
+# Local run artifacts and machine-specific helpers
+hpc_results/
+2DPhaseChangePINNs/hpc_results/
+2DPhaseChangePINNs/qwen3_tts_local/
+2DPhaseChangePINNs/run_caseB_fresh_2h.ps1
+2DPhaseChangePINNs/run_caseB_hotwall_6h.ps1
+2DPhaseChangePINNs/run_pre_resample_windows.py
+hpc_run.py
+hpc_run.py.*
