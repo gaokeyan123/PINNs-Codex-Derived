@@ -4,13 +4,13 @@ sampling.py — Collocation point generation for PINN training.
 Seven point sets are produced, matching the keys expected by
 equations.compute_all_residuals():
 
-  interior  : Latin Hypercube in (r, x, t)     — covers both subdomains
-  interface : Adaptive — r set to r̂_int(x,t)  — chases the moving interface
+  interior  : Latin Hypercube in (r, x, tau)   — covers both subdomains
+  interface : Adaptive — r set to r_int(x,tau) — chases the moving interface
   wall      : r = r_w  (outer cold wall)
   inlet     : x = 0    (pipe inlet)
   outlet    : x = L    (pipe outlet)
   axis      : r ≈ 0    (symmetry axis, see note below)
-  ic        : t = 0    (initial condition)
+  ic        : tau = 0  (initial condition)
 
 All tensors are returned flat [N] with requires_grad=True so that
 equations._grad() can differentiate through them.
@@ -70,7 +70,11 @@ def _lhs(N: int, d: int, seed: int = 0) -> torch.Tensor:
 
 
 def _pack(r: torch.Tensor, x: torch.Tensor, t: torch.Tensor) -> dict:
-    """Return a point dict with requires_grad=True on all entries."""
+    """Return a point dict with requires_grad=True on all entries.
+
+    The dictionary key stays "t" for backward compatibility with older
+    code/checkpoints, but the stored coordinate is the convective tau.
+    """
     return {
         "r": r.detach().requires_grad_(True),
         "x": x.detach().requires_grad_(True),
@@ -83,9 +87,9 @@ def _pack(r: torch.Tensor, x: torch.Tensor, t: torch.Tensor) -> dict:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def sample_interior(N: int, cfg: Config, seed: int = 0) -> dict:
-    """Latin Hypercube points in the full space-time domain (r, x, t).
+    """Latin Hypercube points in the full space-time domain (r, x, tau).
 
-    Domain:  r ∈ [0, r_w],  x ∈ [0, L],  t ∈ [0, t_end].
+    Domain:  r in [0, r_w], x in [0, L], tau in [0, tau_end].
 
     Points intentionally span BOTH fluid and deposit subdomains.
     The smooth Heaviside H_ε in equations.py selects which PDE residual
@@ -99,7 +103,7 @@ def sample_interior(N: int, cfg: Config, seed: int = 0) -> dict:
         )
     r = r_min + s[:, 0] * (cfg.case.r_w - r_min)
     x = s[:, 1] * cfg.case.L
-    t = s[:, 2] * cfg.case.t_end
+    t = s[:, 2] * cfg.case.tau_end
     return _pack(r, x, t)
 
 
@@ -108,16 +112,16 @@ def sample_interior(N: int, cfg: Config, seed: int = 0) -> dict:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def sample_wall(N: int, cfg: Config, seed: int = 0) -> dict:
-    """Outer wall points: r = r̂_w = 1, random (x, t) via LHS."""
+    """Outer wall points: r = r_w = 1, random (x, tau) via LHS."""
     s = _lhs(N, 2, seed)
     r = torch.full((N,), cfg.case.r_w)
     x = s[:, 0] * cfg.case.L
-    t = s[:, 1] * cfg.case.t_end
+    t = s[:, 1] * cfg.case.tau_end
     return _pack(r, x, t)
 
 
 def sample_inlet(N: int, cfg: Config, seed: int = 0) -> dict:
-    """Inlet points: x = 0, random (r, t) via LHS.
+    """Inlet points: x = 0, random (r, tau) via LHS.
 
     r spans the full cross-section [0, r_w] so the inlet Poiseuille
     profile and temperature BC are enforced at all radii.
@@ -125,21 +129,21 @@ def sample_inlet(N: int, cfg: Config, seed: int = 0) -> dict:
     s = _lhs(N, 2, seed)
     r = s[:, 0] * cfg.case.r_w
     x = torch.zeros(N)
-    t = s[:, 1] * cfg.case.t_end
+    t = s[:, 1] * cfg.case.tau_end
     return _pack(r, x, t)
 
 
 def sample_outlet(N: int, cfg: Config, seed: int = 0) -> dict:
-    """Outlet points: x = L, random (r, t) via LHS."""
+    """Outlet points: x = L, random (r, tau) via LHS."""
     s = _lhs(N, 2, seed)
     r = s[:, 0] * cfg.case.r_w
     x = torch.full((N,), cfg.case.L)
-    t = s[:, 1] * cfg.case.t_end
+    t = s[:, 1] * cfg.case.tau_end
     return _pack(r, x, t)
 
 
 def sample_axis(N: int, cfg: Config, seed: int = 0) -> dict:
-    """Symmetry axis points: r = _AXIS_R ≈ 0, random (x, t) via LHS.
+    """Symmetry axis points: r = _AXIS_R near 0, random (x, tau) via LHS.
 
     r is set to 1e-4 rather than exactly 0 to avoid the 1/r singularity
     in _laplacian_cyl while still faithfully representing the axis BC.
@@ -147,7 +151,7 @@ def sample_axis(N: int, cfg: Config, seed: int = 0) -> dict:
     s = _lhs(N, 2, seed)
     r = torch.full((N,), _AXIS_R)
     x = s[:, 0] * cfg.case.L
-    t = s[:, 1] * cfg.case.t_end
+    t = s[:, 1] * cfg.case.tau_end
     return _pack(r, x, t)
 
 
@@ -156,7 +160,7 @@ def sample_axis(N: int, cfg: Config, seed: int = 0) -> dict:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def sample_ic(N: int, cfg: Config, seed: int = 0) -> dict:
-    """IC points: t = 0, random (r, x) via LHS."""
+    """IC points: tau = 0, random (r, x) via LHS."""
     s = _lhs(N, 2, seed)
     r = s[:, 0] * cfg.case.r_w
     x = s[:, 1] * cfg.case.L
@@ -169,17 +173,17 @@ def sample_ic(N: int, cfg: Config, seed: int = 0) -> dict:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def sample_interface(model, N: int, cfg: Config, seed: int = 0) -> dict:
-    """Adaptive interface points: r = r̂_int(x, t) from the current network.
+    """Adaptive interface points: r = r_int(x, tau) from the current network.
 
     Algorithm
     ---------
-    1. Draw N (x, t) pairs uniformly via LHS.
+    1. Draw N (x, tau) pairs uniformly via LHS.
     2. Query the network's interface head under torch.no_grad() to obtain
        r_int values — these become the r-coordinate of each point.
     3. Detach and re-wrap with requires_grad=True so the point positions
        are frozen for this training step (preventing stale graph references).
 
-    The interface head is masked to (x, t) only (network.py design), so
+    The interface head is masked to (x, tau) only (network.py design), so
     passing r_dummy=0 does not affect the r_int prediction.
 
     Called once at startup and then every cfg.sampling.resample_every iters
@@ -188,7 +192,7 @@ def sample_interface(model, N: int, cfg: Config, seed: int = 0) -> dict:
     device = next(model.parameters()).device
     s = _lhs(N, 2, seed).to(device)
     x_samp = s[:, 0] * cfg.case.L
-    t_samp = s[:, 1] * cfg.case.t_end
+    t_samp = s[:, 1] * cfg.case.tau_end
 
     # TODO: Test a staged differentiable T_cont path later.  Current interface
     # sampling intentionally freezes r_int coordinates, so T_cont trains the

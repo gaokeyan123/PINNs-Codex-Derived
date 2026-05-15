@@ -2,14 +2,14 @@
 PINNs network: one neural model with two branches.
 
 The field branch predicts local flow and temperature fields:
-    (u_r, u_x, p, Theta_f, Theta_dep) = F(r, x, t)
+    (u_r, u_x, p, Theta_f, Theta_dep) = F(r, x, tau)
 
 The interface branch predicts the moving phase boundary:
-    r_int = G(x, t)
+    r_int = G(x, tau)
 
 The interface branch intentionally does not receive r.  That makes
 partial r_int / partial r exactly zero by construction, matching the
-physical idea that the interface radius is a single value at each x,t.
+physical idea that the interface radius is a single value at each x,tau.
 """
 
 import torch  # Main tensor/autograd library used by the PINN.
@@ -43,16 +43,16 @@ class PINNSolidification(nn.Module):  # Main neural network used by training and
 
     def __init__(self, net_cfg: NetworkConfig, case_cfg: CaseConfig, seed: int = 42):  # Create all layers.
         super().__init__()  # Initialize nn.Module internals.
-        self.case = case_cfg  # Save case parameters such as r_w, L, t_end, and temperature scale.
+        self.case = case_cfg  # Save case parameters such as r_w, L, tau_end, and temperature scale.
 
         enc_out = 2 * net_cfg.fourier_features  # FourierEncoding outputs sin and cos, so channels double.
-        self.fourier_3d = FourierEncoding(  # Encoder for full field inputs (r, x, t).
+        self.fourier_3d = FourierEncoding(  # Encoder for full field inputs (r, x, tau).
             3,  # Field branch uses three coordinates.
             net_cfg.fourier_features,  # Number of random frequencies.
             net_cfg.fourier_sigma,  # Frequency scale.
             seed,  # Seed for reproducible field-branch features.
         )
-        self.fourier_2d = FourierEncoding(  # Encoder for interface inputs (x, t).
+        self.fourier_2d = FourierEncoding(  # Encoder for interface inputs (x, tau).
             2,  # Interface branch uses only two coordinates.
             net_cfg.fourier_features,  # Number of random frequencies.
             net_cfg.fourier_sigma,  # Frequency scale.
@@ -71,7 +71,7 @@ class PINNSolidification(nn.Module):  # Main neural network used by training and
             int_trunk_layers.append(  # Append one more interface MLP block.
                 _mlp_block(net_cfg.n_hidden_units, net_cfg.n_hidden_units)  # Hidden-to-hidden layer.
             )
-        self.int_trunk = nn.Sequential(*int_trunk_layers)  # Interface trunk maps x,t features to hidden state.
+        self.int_trunk = nn.Sequential(*int_trunk_layers)  # Interface trunk maps x,tau features to hidden state.
 
         self.field_head = nn.Linear(net_cfg.n_hidden_units, 5)  # Predict u_r, u_x, p, Theta_f, Theta_dep.
         self.int_head = nn.Linear(net_cfg.n_hidden_units, 1)  # Predict one scalar: r_int.
@@ -88,22 +88,22 @@ class PINNSolidification(nn.Module):  # Main neural network used by training and
         self,  # Current model instance.
         r: torch.Tensor,  # Radial coordinate tensor.
         x: torch.Tensor,  # Axial coordinate tensor.
-        t: torch.Tensor,  # Time coordinate tensor.
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:  # Return normalized r, x, and t.
+        t: torch.Tensor,  # Tau coordinate tensor.
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:  # Return normalized r, x, and tau.
         """Scale each coordinate to roughly [0, 1] before Fourier encoding."""
         r_n = r / max(self.case.r_w, 1e-12)  # Normalize radius by pipe wall radius.
         x_n = x / max(self.case.L, 1e-12)  # Normalize axial position by pipe length.
-        t_n = t / max(self.case.t_end, 1e-12)  # Normalize time by final case time.
+        t_n = t / max(self.case.tau_end, 1e-12)  # Normalize tau by final case tau.
         return r_n, x_n, t_n  # Return normalized coordinates for both network branches.
 
     def forward(self, r: torch.Tensor, x: torch.Tensor, t: torch.Tensor):  # Evaluate the PINN at points.
-        """Run a forward pass for flat tensors r, x, and t with shape [N]."""
+        """Run a forward pass for flat tensors r, x, and tau with shape [N]."""
         r = r.unsqueeze(-1)  # Change shape from [N] to [N, 1] for concatenation.
         x = x.unsqueeze(-1)  # Change shape from [N] to [N, 1] for concatenation.
         t = t.unsqueeze(-1)  # Change shape from [N] to [N, 1] for concatenation.
         r_n, x_n, t_n = self._normalise_inputs(r, x, t)  # Normalize coordinates before Fourier features.
 
-        inp_3d = torch.cat([r_n, x_n, t_n], dim=-1)  # Field branch input: [r, x, t], shape [N, 3].
+        inp_3d = torch.cat([r_n, x_n, t_n], dim=-1)  # Field branch input: [r, x, tau], shape [N, 3].
         enc_3d = self.fourier_3d(inp_3d)  # Fourier-encode field coordinates, shape [N, 2F].
         features = self.trunk(enc_3d)  # Run encoded coordinates through the field MLP trunk.
         raw = self.field_head(features)  # Produce five raw field outputs, shape [N, 5].
@@ -120,9 +120,9 @@ class PINNSolidification(nn.Module):  # Main neural network used by training and
         Theta_f = theta_max * torch.sigmoid(raw[:, 3])  # Fluid temperature bounded to [0, theta_max].
         Theta_dep = theta_max * torch.sigmoid(raw[:, 4])  # Deposit temperature bounded to [0, theta_max].
 
-        inp_2d = torch.cat([x_n, t_n], dim=-1)  # Interface branch input: [x, t], shape [N, 2].
+        inp_2d = torch.cat([x_n, t_n], dim=-1)  # Interface branch input: [x, tau], shape [N, 2].
         enc_2d = self.fourier_2d(inp_2d)  # Fourier-encode interface coordinates, shape [N, 2F].
-        int_feat = self.int_trunk(enc_2d)  # Run encoded x,t through the interface MLP trunk.
+        int_feat = self.int_trunk(enc_2d)  # Run encoded x,tau through the interface MLP trunk.
         r_int = torch.sigmoid(self.int_head(int_feat)).squeeze(-1) * self.case.r_w  # Bound interface to [0, r_w].
 
         return {  # Return all predicted quantities in a named dictionary.
@@ -131,7 +131,7 @@ class PINNSolidification(nn.Module):  # Main neural network used by training and
             "p": p,  # Pressure field.
             "Theta_f": Theta_f,  # Fluid temperature field.
             "Theta_dep": Theta_dep,  # Deposit temperature field.
-            "r_int": r_int,  # Interface radius depending only on x and t.
+            "r_int": r_int,  # Interface radius depending only on x and tau.
         }
 
     def smooth_heaviside(  # Smooth region indicator for fluid/deposit blending.
@@ -159,7 +159,7 @@ if __name__ == "__main__":  # Run this block only when executing network.py dire
     r = torch.rand(N, requires_grad=True)  # Random radial locations with autograd enabled.
     x = torch.rand(N) * cfg.case.L  # Random axial locations over the pipe length.
     x.requires_grad_(True)  # Enable derivatives with respect to x.
-    t = torch.rand(N, requires_grad=True)  # Random times with autograd enabled.
+    t = (torch.rand(N) * cfg.case.tau_end).requires_grad_(True)  # Random tau values with autograd enabled.
 
     out = model(r, x, t)  # Evaluate all model outputs at the random points.
 
@@ -170,4 +170,4 @@ if __name__ == "__main__":  # Run this block only when executing network.py dire
     loss = out["r_int"].sum()  # Scalar expression using only the interface output.
     loss.backward()  # Backpropagate to check whether r_int depends on r.
     assert r.grad is None or r.grad.abs().max().item() < 1e-12, "FAIL: r_int should not depend on r"  # Enforce bias.
-    print("\n[PASS] r_int gradient w.r.t. r is zero: interface head uses only x and t.")  # Report success.
+    print("\n[PASS] r_int gradient w.r.t. r is zero: interface head uses only x and tau.")  # Report success.

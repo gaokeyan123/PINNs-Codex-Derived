@@ -1,54 +1,90 @@
 # Sharp-Interface PINN Equations
 
-This file records the nondimensional governing equations currently implemented
-in the sharp-interface PINN branch for case `20260410_nonDimm_goodmatchCaseB`.
+This file is the source of truth for the nondimensional equations currently
+implemented in `equations.py` for case `20260410_nonDimm_goodmatchCaseB`.
 
 ## Nondimensional Variables
 
-The temperature scale is
+The active convention matches the Excel/Fluent setup:
 
 $$
-\Theta = \frac{T - T_w}{T_{int} - T_w}.
+r=\frac{r_{dim}}{r_w},\qquad
+x=\frac{x_{dim}}{r_w},\qquad
+\tau=\frac{t_{dim}U}{L_{total}}.
 $$
 
-The Stefan number uses the same temperature scale:
+Velocity, pressure, and temperature are
 
 $$
-Ste = \frac{C_{p,f}(T_{int}-T_w)}{L_f}.
+u=\frac{u_{dim}}{U},\qquad
+p=\frac{p_{dim}}{\rho_f U^2},\qquad
+\Theta=\frac{T-T_w}{T_{int}-T_w}.
 $$
 
-For the active verification case,
+The pipe aspect ratio used in the equations is
 
 $$
-T_{in}=5^\circ C,\qquad T_{int}=0^\circ C,\qquad T_w=-5^\circ C,
+A=\frac{L_{total}}{r_w}=10.25.
 $$
 
-so
+The Reynolds and Peclet numbers are diameter-based, as in the Excel workbook:
 
 $$
-\Theta_{in}=2,\qquad \Theta_{solidus}=1,\qquad \Theta_w=0.
+Re_D=\frac{U(2r_w)}{\nu},\qquad
+Pe_D=\frac{U(2r_w)}{\alpha_f}.
 $$
 
-The active nondimensional case parameters are
+The Stefan number is
 
 $$
-Pe=14.3,\qquad Ste=0.06275,\qquad Re=1.53,\qquad k_{ratio}=1,
+Ste=\frac{C_{p,f}(T_{int}-T_w)}{L_f}.
 $$
 
-$$
-r_a=0,\qquad r_w=1,\qquad L=10.25,\qquad \hat{t}_{end}=0.8.
-$$
-
-The network predicts
+For Case B:
 
 $$
-\left(u_r,\ u_x,\ p,\ \Theta_f,\ \Theta_{dep},\ r_{int}(x,t)\right).
+Pe_D=14.329521,\qquad
+Re_D=1.53,\qquad
+Ste=0.06275,\qquad
+k_{ratio}=1.
 $$
 
-## Cylindrical Operators
+The implemented deposit energy equation assumes equal fluid/deposit
+volumetric heat capacity. If the verification case later uses
+$(\rho C_p)_{dep} \ne (\rho C_p)_f$, a separate `rhoCp_ratio` factor must be
+added to the deposit transient term.
 
-For any scalar or axial component \(f(r,x,t)\), the implemented cylindrical
-Laplacian is
+The final nondimensional time for the 8 s Fluent comparison is
+
+$$
+\tau_{end}=\frac{8U}{L_{total}}=\frac{8}{10.25}=0.780487804878.
+$$
+
+For `T_in=5 C`, `T_int=0 C`, and `T_wall=-5 C`:
+
+$$
+\Theta_{in}=2,\qquad
+\Theta_{solidus}=1,\qquad
+\Theta_w=0.
+$$
+
+## Network Scaling
+
+The model receives collocation coordinates `(r, x, tau)`. Inside
+`network.forward()`, these inputs are scaled only for numerical conditioning:
+
+$$
+r_n=\frac{r}{r_w},\qquad
+x_n=\frac{x}{L},\qquad
+\tau_n=\frac{\tau}{\tau_{end}}.
+$$
+
+This is not a second nondimensionalization. Autograd differentiates through the
+scaling, so residuals are still derivatives with respect to `(r, x, tau)`.
+
+## Operators
+
+For scalar fields and axial velocity:
 
 $$
 \nabla^2_{cyl} f
@@ -60,41 +96,32 @@ $$
 \frac{\partial^2 f}{\partial x^2}.
 $$
 
-For radial velocity, the viscous cylindrical vector term is
+For radial velocity, the viscous vector term is
 
 $$
-\nabla^2_{cyl} u_r - \frac{u_r}{r^2}.
+\nabla^2_{cyl}u_r-\frac{u_r}{r^2}.
 $$
 
-The implementation clamps \(r\) internally in the singular \(1/r\) terms for
-numerical stability, while interior PDE sampling excludes only the very near
-axis region and keeps the axis boundary condition active.
+The implementation clamps the singular `1/r` factors internally for numerical
+stability. Interior PDE sampling excludes the near-axis region, while the axis
+boundary condition remains active.
 
-## Smooth Region Weighting
+## Region Weighting
 
-The code uses a smooth Heaviside indicator \(H_\epsilon(r,r_{int})\), where
-
-$$
-H_\epsilon \approx 0 \quad \text{in fluid},
-\qquad
-H_\epsilon \approx 1 \quad \text{in deposit}.
-$$
-
-Fluid residuals are multiplied by
+The smooth deposit indicator is
 
 $$
-1-H_\epsilon,
+H_\epsilon(r,r_{int})
+=
+\frac{1}{2}\left[1+\tanh\left(\frac{r-r_{int}}{\epsilon}\right)\right].
 $$
 
-and deposit residuals are multiplied by
+`H` is approximately 0 in fluid and 1 in deposit. Fluid residuals are
+multiplied by `1-H`; deposit residuals are multiplied by `H`.
 
-$$
-H_\epsilon.
-$$
+## Interior Residuals
 
-## Fluid Equations
-
-### Continuity
+Continuity:
 
 $$
 R_{mass}
@@ -106,18 +133,12 @@ R_{mass}
 \frac{\partial u_x}{\partial x}.
 $$
 
-The loss uses
-
-$$
-(1-H_\epsilon)R_{mass}.
-$$
-
-### Axial Momentum
+Axial momentum:
 
 $$
 R_{mom,x}
 =
-\frac{1}{Pe}\frac{\partial u_x}{\partial t}
+\frac{1}{A}\frac{\partial u_x}{\partial \tau}
 +
 u_r\frac{\partial u_x}{\partial r}
 +
@@ -125,21 +146,15 @@ u_x\frac{\partial u_x}{\partial x}
 +
 \frac{\partial p}{\partial x}
 -
-\frac{1}{Re}\nabla^2_{cyl}u_x.
+\frac{2}{Re_D}\nabla^2_{cyl}u_x.
 $$
 
-The loss uses
-
-$$
-(1-H_\epsilon)R_{mom,x}.
-$$
-
-### Radial Momentum
+Radial momentum:
 
 $$
 R_{mom,r}
 =
-\frac{1}{Pe}\frac{\partial u_r}{\partial t}
+\frac{1}{A}\frac{\partial u_r}{\partial \tau}
 +
 u_r\frac{\partial u_r}{\partial r}
 +
@@ -147,357 +162,183 @@ u_x\frac{\partial u_r}{\partial x}
 +
 \frac{\partial p}{\partial r}
 -
-\frac{1}{Re}
+\frac{2}{Re_D}
 \left(
 \nabla^2_{cyl}u_r-\frac{u_r}{r^2}
 \right).
 $$
 
-The loss uses
-
-$$
-(1-H_\epsilon)R_{mom,r}.
-$$
-
-### Fluid Energy
+Fluid energy:
 
 $$
 R_{E,f}
 =
-\frac{\partial \Theta_f}{\partial t}
+\frac{1}{A}\frac{\partial \Theta_f}{\partial \tau}
 +
-Pe
-\left(
 u_r\frac{\partial \Theta_f}{\partial r}
 +
 u_x\frac{\partial \Theta_f}{\partial x}
-\right)
 -
-\nabla^2_{cyl}\Theta_f.
+\frac{2}{Pe_D}\nabla^2_{cyl}\Theta_f.
 $$
 
-The loss uses
-
-$$
-(1-H_\epsilon)R_{E,f}.
-$$
-
-## Deposit Equation
-
-### Deposit Energy
+Deposit energy:
 
 $$
 R_{E,dep}
 =
-\frac{\partial \Theta_{dep}}{\partial t}
+\frac{1}{A}\frac{\partial \Theta_{dep}}{\partial \tau}
 -
-k_{ratio}\nabla^2_{cyl}\Theta_{dep}.
+\frac{2k_{ratio}}{Pe_D}\nabla^2_{cyl}\Theta_{dep}.
 $$
 
-The loss uses
+## Interface Residuals
 
-$$
-H_\epsilon R_{E,dep}.
-$$
+The learned interface is `r = r_int(x, tau)`.
 
-For the active case,
-
-$$
-k_{ratio}=1.
-$$
-
-## Interface Conditions
-
-The learned interface is
-
-$$
-r=r_{int}(x,t).
-$$
-
-### Stefan Condition
-
-The Stefan residual implemented in code is
+Stefan condition:
 
 $$
 R_{Stefan}
 =
-\frac{\partial r_{int}}{\partial t}
+\frac{\partial r_{int}}{\partial \tau}
 -
-Ste
+\frac{2A}{Pe_D}Ste
 \left(
-k_{ratio}
-\left.\frac{\partial \Theta_{dep}}{\partial r}\right|_{\Gamma}
+k_{ratio}\left.\frac{\partial \Theta_{dep}}{\partial r}\right|_\Gamma
 -
-\left.\frac{\partial \Theta_f}{\partial r}\right|_{\Gamma}
+\left.\frac{\partial \Theta_f}{\partial r}\right|_\Gamma
 \right).
 $$
 
-The target condition is
+Interface temperature:
 
 $$
-R_{Stefan}=0.
+R_{T,f}=\Theta_f(r_{int},x,\tau)-\Theta_{solidus},
+\qquad
+R_{T,dep}=\Theta_{dep}(r_{int},x,\tau)-\Theta_{solidus}.
 $$
 
-For the active case,
+Interface no-slip velocity:
 
 $$
-Ste=0.06275,\qquad k_{ratio}=1.
+R_{u,\Gamma,x}=u_x(r_{int},x,\tau),\qquad
+R_{u,\Gamma,r}=u_r(r_{int},x,\tau).
 $$
 
-### Interface Temperature
-
-At the interface,
+Interface monotonic penalties:
 
 $$
-\Theta_f(r_{int},x,t)=\Theta_{solidus},
+R_{rint,\tau}=\max\left(0,\frac{\partial r_{int}}{\partial \tau}\right),
+\qquad
+R_{rint,x}=\max\left(0,\frac{\partial r_{int}}{\partial x}\right).
 $$
 
-$$
-\Theta_{dep}(r_{int},x,t)=\Theta_{solidus}.
-$$
+No current loss term penalizes `d2r_int/dx2`.
 
-The implemented residuals are
+## Boundary And Initial Conditions
 
-$$
-R_{T,f}
-=
-\Theta_f(r_{int},x,t)-\Theta_{solidus},
-$$
+Wall, `r = r_w`:
 
 $$
-R_{T,dep}
-=
-\Theta_{dep}(r_{int},x,t)-\Theta_{solidus}.
+\Theta_{dep}(r_w,x,\tau)=\Theta_w(x),\qquad
+u_r(r_w,x,\tau)=0,\qquad
+u_x(r_w,x,\tau)=0.
 $$
 
-For the active case,
+The wall temperature is
 
 $$
-\Theta_{solidus}=1.
-$$
-
-### Interface Velocity
-
-The deposit is treated as stationary and attached to the wall.  The current
-sharp-interface loss therefore enforces no slip at the fluid/deposit interface:
-
-$$
-R_{u,\Gamma,x}=u_x(r_{int},x,t),
-$$
-
-$$
-R_{u,\Gamma,r}=u_r(r_{int},x,t).
-$$
-
-The target condition is
-
-$$
-R_{u,\Gamma,x}=0,\qquad R_{u,\Gamma,r}=0.
-$$
-
-## Interface Stabilization Terms
-
-These are auxiliary training penalties in the current sharp-interface loss.
-They are not separate conservation laws.
-
-Solidification should move the interface inward, so the model penalizes
-positive interface-radius growth:
-
-$$
-R_{r,t}
-=
-\max\left(\frac{\partial r_{int}}{\partial t},0\right).
-$$
-
-For the current cold-wall/hot-inlet verification setup, deposit thickness is
-expected not to decrease downstream, so the code penalizes downstream increases
-of \(r_{int}\):
-
-$$
-R_{r,x}
-=
-\max\left(\frac{\partial r_{int}}{\partial x},0\right).
-$$
-
-## Boundary Conditions
-
-### Wall Boundary, \(r=r_w\)
-
-At the wall,
-
-$$
-\Theta_{dep}(r_w,x,t)=
+\Theta_w(x)=
 \begin{cases}
 \Theta_{in}, & 0 \le x \le 0.25,\\
-\Theta_w, & x > 0.25,
+\Theta_{wall}, & x > 0.25.
 \end{cases}
 $$
 
+Inlet, `x = 0`:
+
 $$
-u_r(r_w,x,t)=0,
+\Theta_f(r,0,\tau)=\Theta_{in},\qquad
+u_r(r,0,\tau)=0,
+$$
+
+$$
+u_x(r,0,\tau)=2\left[1-\left(\frac{r}{r_{int}(0,\tau)}\right)^2\right],
 \qquad
-u_x(r_w,x,t)=0.
+r_{int}(0,\tau)=r_w.
 $$
 
-For the active case,
+Outlet, `x = L`:
 
 $$
-\Theta_{in}=2,\qquad \Theta_w=0.
+\frac{\partial \Theta_f}{\partial x}(r,L,\tau)=0,\qquad
+\frac{\partial u_x}{\partial x}(r,L,\tau)=0.
 $$
 
-### Inlet Boundary, \(x=0\)
-
-At the inlet,
+Axis, implemented at `r = 1e-4`:
 
 $$
-\Theta_f(r,0,t)=\Theta_{in},
+u_r(0,x,\tau)=0,\qquad
+\frac{\partial \Theta_f}{\partial r}(0,x,\tau)=0,\qquad
+\frac{\partial u_x}{\partial r}(0,x,\tau)=0.
 $$
 
-$$
-u_r(r,0,t)=0,
-$$
+Initial condition, `tau = 0`:
 
 $$
-u_x(r,0,t)
-=
-2\left(1-\frac{r^2}{r_{int}(0,t)^2}\right),
-$$
-
-so the nondimensional cross-sectional average inlet velocity is 1 and the
-centerline maximum is 2.
-
-$$
-r_{int}(0,t)=r_w.
-$$
-
-For the active case,
-
-$$
-\Theta_{in}=2,\qquad r_w=1.
-$$
-
-### Outlet Boundary, \(x=L\)
-
-At the outlet,
-
-$$
-\frac{\partial \Theta_f}{\partial x}(r,L,t)=0,
+r_{int}(x,0)=r_w,\qquad
+\Theta_f(r,x,0)=\Theta_{in},\qquad
+u_r(r,x,0)=0,
 $$
 
 $$
-\frac{\partial u_x}{\partial x}(r,L,t)=0.
+u_x(r,x,0)=2(1-r^2).
 $$
 
-### Axis Boundary, \(r=0\)
+There is no explicit `Theta_dep` initial-condition residual.
 
-At the axis,
+## Loss Assembly
 
-$$
-u_r(0,x,t)=0,
-$$
+Every residual is converted to MSE. The current weighted loss terms are:
 
 $$
-\frac{\partial \Theta_f}{\partial r}(0,x,t)=0,
+L_{mass}=1\,MSE((1-H)R_{mass}),
 $$
 
 $$
-\frac{\partial u_x}{\partial r}(0,x,t)=0.
-$$
-
-## Initial Conditions
-
-At \(t=0\), the pipe is initialized as clean and hot:
-
-$$
-r_{int}(x,0)=r_w,
+L_{mom,x}=1\,MSE((1-H)R_{mom,x}),\qquad
+L_{mom,r}=1\,MSE((1-H)R_{mom,r}),
 $$
 
 $$
-\Theta_f(r,x,0)=\Theta_{in},
+L_{E,f}=1\,MSE((1-H)R_{E,f}),\qquad
+L_{E,dep}=1\,MSE(HR_{E,dep}),
 $$
 
 $$
-u_x(r,x,0)
-=
-2\left(1-\frac{r^2}{r_w^2}\right),
+L_{Stefan}=10\,MSE(R_{Stefan}),
 $$
 
 $$
-u_r(r,x,0)=0.
-$$
-
-For the active case,
-
-$$
-r_w=1,\qquad \Theta_{in}=2.
-$$
-
-## Composite Loss
-
-Each residual group is converted to a mean-squared error and then weighted.
-For the two paired interface constraints, the code averages the two sides:
-
-$$
-\mathcal{L}_T
-=
-\frac{1}{2}
-\left(
-\operatorname{MSE}(R_{T,f})
-+
-\operatorname{MSE}(R_{T,dep})
-\right),
+L_{Tcont}
+=100\cdot0.5\left[MSE(R_{T,f})+MSE(R_{T,dep})\right],
 $$
 
 $$
-\mathcal{L}_{u,\Gamma}
-=
-\frac{1}{2}
-\left(
-\operatorname{MSE}(R_{u,\Gamma,x})
-+
-\operatorname{MSE}(R_{u,\Gamma,r})
-\right).
-$$
-
-The implemented total loss is
-
-$$
-\mathcal{L}
-=
-w_{mass}\mathcal{L}_{mass}
-+
-w_{mom,x}\mathcal{L}_{mom,x}
-+
-w_{mom,r}\mathcal{L}_{mom,r}
-+
-w_{E,f}\mathcal{L}_{E,f}
-+
-w_{E,dep}\mathcal{L}_{E,dep}
-+
-w_{Stefan}\mathcal{L}_{Stefan}
-+
-w_T\mathcal{L}_T
-+
-w_{u,\Gamma}\mathcal{L}_{u,\Gamma}
-+
-w_{r,t}\mathcal{L}_{r,t}
-+
-w_{r,x}\mathcal{L}_{r,x}
-+
-w_{BC/IC}\mathcal{L}_{BC/IC}.
-$$
-
-The active default weights are
-
-$$
-w_{mass}=w_{mom,x}=w_{mom,r}=w_{E,f}=w_{E,dep}=1,
+L_{interface\_vel}
+=10\cdot0.5\left[MSE(R_{u,\Gamma,x})+MSE(R_{u,\Gamma,r})\right],
 $$
 
 $$
-w_{Stefan}=10,\qquad
-w_T=100,\qquad
-w_{u,\Gamma}=10,\qquad
-w_{r,t}=10,\qquad
-w_{r,x}=10,\qquad
-w_{BC/IC}=100.
+L_{rint}=10\,MSE(R_{rint,\tau})+10\,MSE(R_{rint,x}).
 $$
+
+The BC/IC term averages the 16 implemented BC/IC residual arrays and applies
+weight 100:
+
+$$
+L_{BC/IC}=100\,\frac{1}{16}\sum_j MSE(R_{BC/IC,j}).
+$$
+
+Full physics training sums all terms. Phase 1 uses only `L_BC/IC`.

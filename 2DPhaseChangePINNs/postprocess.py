@@ -34,7 +34,12 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Plot trained PINN fields and residual maps.")
     parser.add_argument("--checkpoint", type=Path, default=cfg.training.checkpoint_dir / "latest.pth")
     parser.add_argument("--matlab-ref", type=Path, default=cfg.output_dir / "matlab_ref.mat")
-    parser.add_argument("--times", type=str, default="0.2,0.4,0.6,0.8")
+    parser.add_argument(
+        "--times",
+        type=str,
+        default="0.1951219512195122,0.3902439024390244,0.5853658536585366,0.7804878048780488",
+        help="Comma-separated tau values for snapshots.",
+    )
     parser.add_argument("--grid-nx", type=int, default=200)
     parser.add_argument("--grid-nr", type=int, default=200)
     parser.add_argument("--output-dir", type=Path, default=cfg.output_dir)
@@ -147,7 +152,7 @@ def load_matlab_reference(path: Path) -> dict[str, Any] | None:
 
     ref = {
         "x": pick(("x", "x_hat", "x_ref", "xgrid", "x_grid")),
-        "times": pick(("t", "time", "times", "t_hat", "snapshots")),
+        "times": pick(("tau", "tau_hat", "tau_values", "t", "time", "times", "t_hat", "snapshots")),
         "r_int": pick(("r_int", "rint", "r_int_ref", "interface", "r_interface")),
     }
     if ref["x"] is None or ref["r_int"] is None:
@@ -197,10 +202,10 @@ def plot_interface_profiles(field_by_time: dict[float, dict[str, np.ndarray]],
                             output_dir: Path) -> None:
     fig, ax = plt.subplots(figsize=(8, 4.5))
     for t_value, fields in field_by_time.items():
-        ax.plot(fields["x_line"], fields["r_int"], lw=2, label=f"PINN t={t_value:g}")
+        ax.plot(fields["x_line"], fields["r_int"], lw=2, label=f"PINN tau={t_value:g}")
         ref_line = select_reference_interface(matlab_ref, t_value)
         if ref_line is not None:
-            ax.plot(ref_line[0], ref_line[1], "--", lw=1.5, label=f"MATLAB t={t_value:g}")
+            ax.plot(ref_line[0], ref_line[1], "--", lw=1.5, label=f"MATLAB tau={t_value:g}")
     ax.set_xlabel("x_hat")
     ax.set_ylabel("r_int_hat")
     ax.set_ylim(0.0, 1.05)
@@ -218,7 +223,7 @@ def plot_thickness_profiles(field_by_time: dict[float, dict[str, np.ndarray]],
     fig, ax = plt.subplots(figsize=(8, 4.5))
     for t_value, fields in field_by_time.items():
         thickness = run_cfg.case.r_w - fields["r_int"]
-        ax.plot(fields["x_line"], thickness, lw=2, label=f"PINN t={t_value:g}")
+        ax.plot(fields["x_line"], thickness, lw=2, label=f"PINN tau={t_value:g}")
         ref_line = select_reference_interface(matlab_ref, t_value)
         if ref_line is not None:
             ax.plot(
@@ -226,7 +231,7 @@ def plot_thickness_profiles(field_by_time: dict[float, dict[str, np.ndarray]],
                 run_cfg.case.r_w - ref_line[1],
                 "--",
                 lw=1.5,
-                label=f"MATLAB t={t_value:g}",
+                label=f"MATLAB tau={t_value:g}",
             )
     ax.set_xlabel("x_hat")
     ax.set_ylabel("r_w - r_int")
@@ -254,9 +259,9 @@ def plot_field_snapshots(t_value: float,
         ax.set_xlabel("x_hat")
         fig.colorbar(im, ax=ax, shrink=0.82)
     axes[0].set_ylabel("r_hat")
-    fig.suptitle(f"PINN fields at t={t_value:g}")
+    fig.suptitle(f"PINN fields at tau={t_value:g}")
     fig.tight_layout()
-    fig.savefig(output_dir / f"fields_t{t_value:.3f}.png", dpi=180)
+    fig.savefig(output_dir / f"fields_tau{t_value:.3f}.png", dpi=180)
     plt.close(fig)
 
 
@@ -265,7 +270,7 @@ def plot_pressure_profiles(field_by_time: dict[float, dict[str, np.ndarray]],
     fig, ax = plt.subplots(figsize=(8, 4.5))
     for t_value, fields in field_by_time.items():
         centerline = fields["p"][0, :]
-        ax.plot(fields["x_line"], centerline, lw=2, label=f"t={t_value:g}")
+        ax.plot(fields["x_line"], centerline, lw=2, label=f"tau={t_value:g}")
     ax.set_xlabel("x_hat")
     ax.set_ylabel("p_hat(r=0, x)")
     ax.set_title("Centerline pressure profile")
@@ -324,17 +329,17 @@ def plot_residual_map(t_value: float,
     ax.plot(fields["x_line"], fields["r_int"], color="cyan", lw=1.4)
     ax.set_xlabel("x_hat")
     ax.set_ylabel("r_hat")
-    ax.set_title(f"log10 PDE residual norm at t={t_value:g}")
+    ax.set_title(f"log10 PDE residual norm at tau={t_value:g}")
     fig.colorbar(im, ax=ax, shrink=0.86)
     fig.tight_layout()
-    fig.savefig(output_dir / f"residual_map_t{t_value:.3f}.png", dpi=180)
+    fig.savefig(output_dir / f"residual_map_tau{t_value:.3f}.png", dpi=180)
     plt.close(fig)
 
 
 def summarize_matlab_error(field_by_time: dict[float, dict[str, np.ndarray]],
                            matlab_ref: dict[str, Any] | None,
                            output_dir: Path) -> None:
-    rows = ["time,pinn_vs_matlab_rint_l2"]
+    rows = ["tau,pinn_vs_matlab_rint_l2"]
     if matlab_ref is None:
         rows.append("no_reference,nan")
     else:

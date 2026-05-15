@@ -90,7 +90,7 @@ def test_interior_bounds():
     pts = sample_interior(500, cfg, seed=3)
     assert pts["r"].min() >= 0.0 and pts["r"].max() <= cfg.case.r_w
     assert pts["x"].min() >= 0.0 and pts["x"].max() <= cfg.case.L
-    assert pts["t"].min() >= 0.0 and pts["t"].max() <= cfg.case.t_end
+    assert pts["t"].min() >= 0.0 and pts["t"].max() <= cfg.case.tau_end
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -130,7 +130,7 @@ def test_boundary_requires_grad():
 def test_boundary_t_in_range():
     for fn in (sample_wall, sample_inlet, sample_outlet, sample_axis):
         pts = fn(200, cfg, seed=5)
-        assert pts["t"].min() >= 0.0 and pts["t"].max() <= cfg.case.t_end
+        assert pts["t"].min() >= 0.0 and pts["t"].max() <= cfg.case.tau_end
 
 
 # ─────────────────────────────────────────────────────────────────────────

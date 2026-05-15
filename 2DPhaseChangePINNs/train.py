@@ -406,7 +406,7 @@ def plot_monitor_snapshot(model: PINNSolidification,  # Define the plot_monitor_
     x = torch.linspace(0.0, run_cfg.case.L, nx, device=device)  # Assign a local variable used by the training workflow.
     r = torch.linspace(0.0, run_cfg.case.r_w, nr, device=device)  # Assign a local variable used by the training workflow.
     rr, xx = torch.meshgrid(r, x, indexing="ij")  # Training-driver logic line.
-    tt = torch.full_like(rr, 0.5 * run_cfg.case.t_end)  # Assign a local variable used by the training workflow.
+    tt = torch.full_like(rr, 0.5 * run_cfg.case.tau_end)  # Assign a local variable used by the training workflow.
 
     with torch.no_grad():  # Disable gradient tracking for evaluation-only work.
         out = model(rr.reshape(-1), xx.reshape(-1), tt.reshape(-1))  # Assign a local variable used by the training workflow.
@@ -414,7 +414,7 @@ def plot_monitor_snapshot(model: PINNSolidification,  # Define the plot_monitor_
         r_int = model(  # Assign a local variable used by the training workflow.
             torch.zeros_like(x),  # Call a method on an object.
             x,  # Training-driver logic line.
-            torch.full_like(x, 0.5 * run_cfg.case.t_end),  # Call a method on an object.
+            torch.full_like(x, 0.5 * run_cfg.case.tau_end),  # Call a method on an object.
         )["r_int"].detach().cpu().numpy()  # Close a multi-line function call or expression.
 
     fig, axes = plt.subplots(1, 2, figsize=(11, 4))  # Create a Matplotlib figure and axes.
@@ -422,7 +422,7 @@ def plot_monitor_snapshot(model: PINNSolidification,  # Define the plot_monitor_
     axes[0].set_xlabel("x_hat")  # Training-driver logic line.
     axes[0].set_ylabel("r_int_hat")  # Training-driver logic line.
     axes[0].set_ylim(0.0, run_cfg.case.r_w * 1.05)  # Training-driver logic line.
-    axes[0].set_title("Interface at t_mid")  # Training-driver logic line.
+    axes[0].set_title("Interface at tau_mid")  # Training-driver logic line.
 
     im = axes[1].contourf(  # Assign a local variable used by the training workflow.
         xx.detach().cpu().numpy(),  # Call a method on an object.
@@ -434,7 +434,7 @@ def plot_monitor_snapshot(model: PINNSolidification,  # Define the plot_monitor_
     axes[1].plot(x.detach().cpu().numpy(), r_int, color="cyan", lw=1.5)  # Training-driver logic line.
     axes[1].set_xlabel("x_hat")  # Training-driver logic line.
     axes[1].set_ylabel("r_hat")  # Training-driver logic line.
-    axes[1].set_title("Theta_f at t_mid")  # Training-driver logic line.
+    axes[1].set_title("Theta_f at tau_mid")  # Training-driver logic line.
     fig.colorbar(im, ax=axes[1], shrink=0.85)  # Call a method on an object.
     fig.suptitle(f"Training monitor, iter {iteration}")  # Call a method on an object.
     fig.tight_layout()  # Call a method on an object.
@@ -475,7 +475,7 @@ def build_target_stop(args: argparse.Namespace, run_cfg: Config) -> TargetStop |
     return TargetStop(  # Return this value to the caller.
         thickness=args.target_solid_thickness,  # Assign a local variable used by the training workflow.
         mode=args.target_thickness_mode,  # Assign a local variable used by the training workflow.
-        t_value=run_cfg.case.t_end if args.target_time is None else args.target_time,  # Assign a local variable used by the training workflow.
+        t_value=run_cfg.case.tau_end if args.target_time is None else args.target_time,  # Assign a local variable used by the training workflow.
         grid_n=args.target_grid_n,  # Assign a local variable used by the training workflow.
         check_every=check_every,  # Assign a local variable used by the training workflow.
         min_iter=args.target_min_iter,  # Assign a local variable used by the training workflow.
@@ -523,7 +523,7 @@ def check_target_stop(model: PINNSolidification,  # Define the check_target_stop
     print(  # Print a progress/status message.
         f"[target] iter {iteration} {phase} thickness "  # Training-driver logic line.
         f"min/mean/max={stats['min']:.4f}/{stats['mean']:.4f}/{stats['max']:.4f} "  # Training-driver logic line.
-        f"at t={target.t_value:g} ({target.mode} target {target.thickness:.4f})",  # Training-driver logic line.
+        f"at tau={target.t_value:g} ({target.mode} target {target.thickness:.4f})",  # Training-driver logic line.
         flush=True,  # Assign a local variable used by the training workflow.
     )  # Close a multi-line function call or expression.
     return value >= target.thickness  # Return this value to the caller.
@@ -772,15 +772,16 @@ def main() -> None:  # Define the main helper function.
         flush=True,  # Assign a local variable used by the training workflow.
     )  # Close a multi-line function call or expression.
     print(  # Print a progress/status message.
-        f"[train] case={run_cfg.case.name} Ste={run_cfg.case.Ste:g} Pe={run_cfg.case.Pe:g} "  # Training-driver logic line.
-        f"Re={run_cfg.case.Re:g} k_ratio={run_cfg.case.k_ratio:g} "  # Training-driver logic line.
-        f"L={run_cfg.case.L:g} r_w={run_cfg.case.r_w:g} t_end={run_cfg.case.t_end:g}",  # Training-driver logic line.
+        f"[train] case={run_cfg.case.name} scheme={run_cfg.case.nondim_scheme} "
+        f"Ste={run_cfg.case.Ste:g} Pe_D={run_cfg.case.Pe_D:g} "
+        f"Re_D={run_cfg.case.Re_D:g} k_ratio={run_cfg.case.k_ratio:g} "
+        f"L={run_cfg.case.L:g} r_w={run_cfg.case.r_w:g} tau_end={run_cfg.case.tau_end:g}",
         flush=True,  # Assign a local variable used by the training workflow.
     )  # Close a multi-line function call or expression.
     if target is not None:  # Branch only when this condition is true.
         print(  # Print a progress/status message.
             f"[train] target: {target.mode} solid thickness >= {target.thickness:g} "  # Training-driver logic line.
-            f"at t={target.t_value:g}, min_iter={target.min_iter}",  # Training-driver logic line.
+            f"at tau={target.t_value:g}, min_iter={target.min_iter}",  # Training-driver logic line.
             flush=True,  # Assign a local variable used by the training workflow.
         )  # Close a multi-line function call or expression.
 

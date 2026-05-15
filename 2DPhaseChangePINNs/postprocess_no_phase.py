@@ -27,7 +27,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/no_phase_plots"))
-    parser.add_argument("--time", type=float, default=1.0)
+    parser.add_argument("--time", type=float, default=None,
+                        help="Tau value to plot; defaults to checkpoint/config tau_end.")
     parser.add_argument("--grid-nx", type=int, default=140)
     parser.add_argument("--grid-nr", type=int, default=80)
     parser.add_argument("--r-min-residual", type=float, default=0.01)
@@ -38,16 +39,28 @@ def load_model(path: Path, device: torch.device) -> tuple[PINNSolidification, Co
     payload = torch.load(path, map_location=device, weights_only=False)
     run_cfg = Config()
     saved_cfg = payload.get("config", {})
+    if "nondim_scheme" in saved_cfg:
+        run_cfg.case.nondim_scheme = str(saved_cfg["nondim_scheme"])
     if "Theta_wall" in saved_cfg:
         run_cfg.case.Theta_wall = float(saved_cfg["Theta_wall"])
     if "Theta_in" in saved_cfg:
         run_cfg.case.Theta_in = float(saved_cfg["Theta_in"])
     if "Theta_solidus" in saved_cfg:
         run_cfg.case.Theta_solidus = float(saved_cfg["Theta_solidus"])
-    if "Pe" in saved_cfg:
-        run_cfg.case.Pe = float(saved_cfg["Pe"])
-    if "Re" in saved_cfg:
-        run_cfg.case.Re = float(saved_cfg["Re"])
+    if "Pe_D" in saved_cfg:
+        run_cfg.case.Pe_D = float(saved_cfg["Pe_D"])
+    elif "Pe" in saved_cfg:
+        run_cfg.case.Pe_D = float(saved_cfg["Pe"])
+    if "Re_D" in saved_cfg:
+        run_cfg.case.Re_D = float(saved_cfg["Re_D"])
+    elif "Re" in saved_cfg:
+        run_cfg.case.Re_D = float(saved_cfg["Re"])
+    if "L" in saved_cfg:
+        run_cfg.case.L = float(saved_cfg["L"])
+    if "tau_end" in saved_cfg:
+        run_cfg.case.tau_end = float(saved_cfg["tau_end"])
+    elif "t_end" in saved_cfg:
+        run_cfg.case.tau_end = float(saved_cfg["t_end"])
 
     model = PINNSolidification(run_cfg.network, run_cfg.case, seed=run_cfg.seed).to(device)
     model.load_state_dict(payload["model_state"])
@@ -97,8 +110,8 @@ def plot_fields(model: PINNSolidification,
         ax.set_xlabel("x")
         ax.set_ylabel("r")
         fig.colorbar(im, ax=ax)
-    fig.suptitle(f"No-phase clean-pipe fields at t={args.time:g}")
-    path = args.output_dir / f"fields_t{args.time:g}.png"
+    fig.suptitle(f"No-phase clean-pipe fields at tau={args.time:g}")
+    path = args.output_dir / f"fields_tau{args.time:g}.png"
     fig.savefig(path, dpi=160)
     plt.close(fig)
     return path
@@ -153,8 +166,8 @@ def plot_residuals(model: PINNSolidification,
         ax.set_xlabel("x")
         ax.set_ylabel("r")
         fig.colorbar(im, ax=ax)
-    fig.suptitle(f"No-phase residual maps at t={args.time:g}; r<{args.r_min_residual:g} masked")
-    path = args.output_dir / f"residuals_t{args.time:g}.png"
+    fig.suptitle(f"No-phase residual maps at tau={args.time:g}; r<{args.r_min_residual:g} masked")
+    path = args.output_dir / f"residuals_tau{args.time:g}.png"
     fig.savefig(path, dpi=160)
     plt.close(fig)
     return path
@@ -194,6 +207,8 @@ def main() -> None:
     device = choose_device(args.device)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     model, run_cfg, payload = load_model(args.checkpoint, device)
+    if args.time is None:
+        args.time = run_cfg.case.tau_end
     print(
         f"[post-no-phase] checkpoint={args.checkpoint} "
         f"iter={payload.get('iteration', 'unknown')}"

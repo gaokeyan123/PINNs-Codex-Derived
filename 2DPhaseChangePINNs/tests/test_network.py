@@ -17,7 +17,7 @@ def model():
 def make_inputs(N=64):
     r = torch.rand(N, requires_grad=True)
     x = (torch.rand(N) * cfg.case.L).requires_grad_(True)
-    t = (torch.rand(N) * cfg.case.t_end).requires_grad_(True)
+    t = (torch.rand(N) * cfg.case.tau_end).requires_grad_(True)
     return r, x, t
 
 
@@ -31,8 +31,9 @@ def test_output_shapes(model):
 def test_temperature_bounds(model):
     r, x, t = make_inputs(N=1000)
     out = model(r, x, t)
-    assert out["Theta_f"].min() >= 0.0 and out["Theta_f"].max() <= 1.0
-    assert out["Theta_dep"].min() >= 0.0 and out["Theta_dep"].max() <= 1.0
+    theta_max = max(cfg.case.Theta_in, cfg.case.Theta_solidus, cfg.case.Theta_wall, 1.0)
+    assert out["Theta_f"].min() >= 0.0 and out["Theta_f"].max() <= theta_max
+    assert out["Theta_dep"].min() >= 0.0 and out["Theta_dep"].max() <= theta_max
 
 
 def test_r_int_bounds(model):
@@ -42,7 +43,7 @@ def test_r_int_bounds(model):
 
 
 def test_r_int_independent_of_r(model):
-    """r_int must not depend on r — interface head is masked to (x, t) only."""
+    """r_int must not depend on r; interface head is masked to (x, tau) only."""
     r, x, t = make_inputs(N=16)
     out = model(r, x, t)
     out["r_int"].sum().backward()

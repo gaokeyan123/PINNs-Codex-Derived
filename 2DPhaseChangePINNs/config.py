@@ -12,21 +12,23 @@ ROOT = Path(__file__).parent
 
 @dataclass
 class CaseConfig:
-    """Non-dimensional physical parameters for the simple test case."""
+    """Excel-consistent non-dimensional physical parameters for Case B."""
     name: str = "20260410_nonDimm_goodmatchCaseB"
 
-    Pe: float = 1.43e1     # Peclet number:  rho_f Cp_f U r_w / k_f
-    Ste: float = 0.06275   # Stefan number:  Cp_f (T_int - T_wall) / L_f
-    Re: float = 1.53       # Reynolds number (laminar)
-    k_ratio: float = 1.0   # k_dep / k_f  (equal conductivities, simplest case)
+    nondim_scheme: str = "excel_radius_x_convective_tau_diameter_groups_v1"
 
-    # Geometry (non-dimensional, r_w = 1 is the reference length)
+    Pe_D: float = 14.329521  # Pe_D = U * (2 r_w) / alpha_f
+    Ste: float = 0.06275     # Ste = Cp_f * (T_int - T_wall) / L_f
+    Re_D: float = 1.53       # Re_D = U * (2 r_w) / nu
+    k_ratio: float = 1.0     # k_dep / k_f
+
+    # Geometry: r = r_dim/r_w and x = x_dim/r_w.
     r_a: float = 0.0       # inner axis radius (0 = solid cylinder)
-    r_w: float = 1.0       # outer wall radius (= 1 by definition of scaling)
-    L: float = 10.25       # pipe length, including the hot-wall inlet section
+    r_w: float = 1.0       # wall radius after scaling by r_w
+    L: float = 10.25       # A = L_total/r_w, including the hot-wall inlet section
 
-    # Time
-    t_end: float = 0.8     # final non-dimensional time
+    # Time: tau = t_dim * U / L_total.
+    tau_end: float = 8.0 / 10.25
 
     # Boundary / initial conditions (non-dimensional temperatures)
     # Reference dimensional values for this verification case:
@@ -39,6 +41,33 @@ class CaseConfig:
 
     # Initial condition: clean pipe, no deposit
     r_int_ic: float = 1.0       # r_int(x, 0) = r_w everywhere
+
+    @property
+    def Pe(self) -> float:
+        """Backward-compatible alias for old checkpoints/scripts."""
+        return self.Pe_D
+
+    @Pe.setter
+    def Pe(self, value: float) -> None:
+        self.Pe_D = float(value)
+
+    @property
+    def Re(self) -> float:
+        """Backward-compatible alias for old checkpoints/scripts."""
+        return self.Re_D
+
+    @Re.setter
+    def Re(self, value: float) -> None:
+        self.Re_D = float(value)
+
+    @property
+    def t_end(self) -> float:
+        """Backward-compatible alias; current time variable is tau."""
+        return self.tau_end
+
+    @t_end.setter
+    def t_end(self, value: float) -> None:
+        self.tau_end = float(value)
 
 
 @dataclass
@@ -123,6 +152,14 @@ def config_from_dict(data: dict[str, Any] | None,
     run_cfg = Config() if fallback is None else copy.deepcopy(fallback)
 
     def _apply(obj: Any, values: dict[str, Any]) -> None:
+        if isinstance(obj, CaseConfig):
+            values = dict(values)
+            if "Pe" in values and "Pe_D" not in values:
+                values["Pe_D"] = values["Pe"]
+            if "Re" in values and "Re_D" not in values:
+                values["Re_D"] = values["Re"]
+            if "t_end" in values and "tau_end" not in values:
+                values["tau_end"] = values["t_end"]
         valid = {item.name for item in fields(obj)} if is_dataclass(obj) else set()
         for key, value in values.items():
             if key not in valid:
@@ -136,7 +173,16 @@ def config_from_dict(data: dict[str, Any] | None,
                 setattr(obj, key, value)
 
     if isinstance(data, dict):
-        _apply(run_cfg, data)
+        values = dict(data)
+        case_keys = {item.name for item in fields(CaseConfig)} | {"Pe", "Re", "t_end"}
+        flat_case_values = {key: value for key, value in values.items() if key in case_keys}
+        if flat_case_values:
+            nested_case = values.get("case", {})
+            merged_case = dict(flat_case_values)
+            if isinstance(nested_case, dict):
+                merged_case.update(nested_case)
+            values["case"] = merged_case
+        _apply(run_cfg, values)
     return run_cfg
 
 
