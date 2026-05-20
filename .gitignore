@@ -28,6 +28,7 @@ env/
 # Generated training artifacts
 2DPhaseChangePINNs/checkpoints/
 2DPhaseChangePINNs/outputs/
+*.png
 # Legacy/default pull location from the local HPC helper; preferred location is
 # 2DPhaseChangePINNs/outputs/hpc_results/ once the helper is updated.
 hpc_results/
