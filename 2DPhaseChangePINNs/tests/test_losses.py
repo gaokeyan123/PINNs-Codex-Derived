@@ -17,15 +17,14 @@ from losses import (
     compute_loss,
     format_loss_line,
     log_to_csv,
-    _BC_IC_KEYS,
 )
 
 torch.manual_seed(0)
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# Fixtures
-# ─────────────────────────────────────────────────────────────────────────
+
+
+
 
 @pytest.fixture(scope="module")
 def model():
@@ -54,9 +53,9 @@ def loss_phase2(model):
     return loss, log
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# 4.1  mse primitive
-# ─────────────────────────────────────────────────────────────────────────
+
+
+
 
 def test_mse_zeros():
     r = torch.zeros(50)
@@ -70,7 +69,7 @@ def test_mse_ones():
 
 def test_mse_known_value():
     r = torch.tensor([1.0, -1.0, 2.0, -2.0])
-    # mean([1, 1, 4, 4]) = 2.5
+
     assert mse(r).item() == pytest.approx(2.5)
 
 
@@ -79,9 +78,9 @@ def test_mse_is_scalar():
     assert mse(r).shape == ()
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# 4.1  compute_loss_terms
-# ─────────────────────────────────────────────────────────────────────────
+
+
+
 
 def test_loss_terms_keys_physics_on(model, batch):
     from equations import compute_all_residuals
@@ -110,7 +109,7 @@ def test_physics_off_placeholder_zeros(model, batch):
     for k in ("mass", "mom_x", "mom_r", "energy_fluid", "energy_dep",
               "stefan", "T_cont", "interface_vel",
               "rint_mono", "rint_x_mono"):
-        assert terms[k].item() == pytest.approx(0.0), \
+        assert terms[k].item() == pytest.approx(0.0),\
             f"{k} should be zero placeholder when physics_on=False"
 
 
@@ -159,9 +158,9 @@ def test_bc_ic_weight_scales_term(model, batch):
                                                  rel=1e-5)
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# 4.2  total_loss
-# ─────────────────────────────────────────────────────────────────────────
+
+
+
 
 def test_total_loss_physics_off_equals_bc_ic(model, batch):
     from losses import _compute_bc_ic_residuals
@@ -185,9 +184,9 @@ def test_total_loss_is_scalar(loss_phase2):
     assert loss.shape == ()
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# 4.4  compute_loss — backward-ability and gradient flow
-# ─────────────────────────────────────────────────────────────────────────
+
+
+
 
 def test_phase1_loss_requires_grad(loss_phase1):
     loss, _ = loss_phase1
@@ -203,7 +202,7 @@ def test_phase1_backward_no_error(model):
     """Phase 1 backward() must not raise."""
     b = build_batch(model, cfg, seed=20)
     loss, _ = compute_loss(model, b, cfg, physics_on=False)
-    loss.backward()   # should not raise
+    loss.backward()
 
 
 def test_phase2_backward_gradients_flow_to_params(model):
@@ -215,7 +214,7 @@ def test_phase2_backward_gradients_flow_to_params(model):
     loss.backward()
     missing = [name for name, p in model.named_parameters()
                if p.requires_grad and p.grad is None]
-    assert len(missing) == 0, \
+    assert len(missing) == 0,\
         f"Parameters with no gradient after backward: {missing}"
 
 
@@ -244,15 +243,15 @@ def test_phase1_loss_less_than_phase2(model):
     """Phase 1 loss (bc_ic only) should be strictly less than Phase 2 total."""
     b = build_batch(model, cfg, seed=40)
     loss1, log1 = compute_loss(model, b, cfg, physics_on=False)
-    b2 = build_batch(model, cfg, seed=40)   # same seed → same points
+    b2 = build_batch(model, cfg, seed=40)
     loss2, log2 = compute_loss(model, b2, cfg, physics_on=True)
-    # Phase 2 adds physics terms — total must be >= Phase 1
+
     assert log2["total"] >= log1["total"] - 1e-6
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# 4.5  format_loss_line
-# ─────────────────────────────────────────────────────────────────────────
+
+
+
 
 def test_format_loss_line_contains_iter(loss_phase2):
     _, log = loss_phase2
@@ -271,9 +270,9 @@ def test_format_loss_line_is_string(loss_phase2):
     assert isinstance(format_loss_line(log, 0, physics_on=True), str)
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# 4.5  log_to_csv
-# ─────────────────────────────────────────────────────────────────────────
+
+
+
 
 def test_log_to_csv_creates_file(tmp_path, loss_phase2):
     _, log = loss_phase2

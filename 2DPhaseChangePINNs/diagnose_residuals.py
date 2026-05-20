@@ -113,14 +113,14 @@ def build_group_rows(residuals: dict[str, torch.Tensor],
         present = [residuals[name].detach() for name in names if name in residuals]
         if not present:
             continue
-        group_mse = sum(float(t.pow(2).mean().cpu().item()) for t in present) / len(present)
+        group_mse = sum(float(tensor.pow(2).mean().cpu().item()) for tensor in present) / len(present)
         rows.append({
             "kind": "loss_group",
             "name": group,
             "rms": math.sqrt(group_mse),
             "mean_abs": "",
             "max_abs": "",
-            "n": sum(int(t.numel()) for t in present),
+            "n": sum(int(tensor.numel()) for tensor in present),
             "weighted_loss": float(terms[group].detach().cpu().item()),
         })
     return sorted(rows, key=lambda row: row["weighted_loss"], reverse=True)
@@ -161,16 +161,17 @@ def main() -> None:
     args = parse_args()
     device = choose_device(args.device)
     payload = torch.load(args.checkpoint, map_location=device, weights_only=False)
-    if isinstance(payload, dict) and isinstance(payload.get("config"), dict):
-        run_cfg = config_from_dict(payload["config"], fallback=Config())
-    else:
-        print("[diagnose] checkpoint has no saved config; using current config.py")
-        run_cfg = Config()
+    if not isinstance(payload, dict):
+        raise ValueError(f"checkpoint must be a dict payload: {args.checkpoint}")
+    if "config" not in payload:
+        raise ValueError(f"checkpoint has no config: {args.checkpoint}")
+    if "model_state" not in payload:
+        raise ValueError(f"checkpoint has no model_state: {args.checkpoint}")
+    run_cfg = config_from_dict(payload["config"])
     apply_sampling_overrides(run_cfg, args)
 
     model = PINNSolidification(run_cfg.network, run_cfg.case, seed=run_cfg.seed).to(device)
-    state = payload.get("model_state", payload.get("model_state_dict", payload))
-    model.load_state_dict(state)
+    model.load_state_dict(payload["model_state"])
     model.eval()
 
     batch = move_batch(build_batch(model, run_cfg, seed=args.seed), device)

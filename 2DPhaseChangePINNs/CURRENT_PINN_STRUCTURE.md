@@ -7,7 +7,6 @@ nondimensionalization is the Excel-consistent Case B convention.
 
 | Quantity | Value |
 |---|---:|
-| `nondim_scheme` | `excel_radius_x_convective_tau_diameter_groups_v1` |
 | `Pe_D` | `14.329521` |
 | `Ste` | `0.06275` |
 | `Re_D` | `1.53` |
@@ -87,8 +86,7 @@ Important implementation details:
   `H approx 0` in fluid and `H approx 1` in deposit.
 - `T_cont` trains temperatures at sampled interface points. The mask uses a
   detached interface for interior residual weighting.
-- The old axial curvature penalty `d2r_int/dx2 = 0` is not part of the current
-  loss. The current regularizers are time monotonicity and downstream
+- The current interface regularizers are time monotonicity and downstream
   monotonicity of `r_int`.
 
 ## Sampling

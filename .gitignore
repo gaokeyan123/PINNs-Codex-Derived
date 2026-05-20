@@ -1,4 +1,4 @@
-# ── Python ────────────────────────────────────────────────────────────────────
+# Python bytecode and package build output
 __pycache__/
 *.py[cod]
 *.pyo
@@ -10,63 +10,39 @@ build/
 .eggs/
 *.egg
 
-# ── Virtual environments ───────────────────────────────────────────────────────
+# Virtual environments and local environment files
 .venv/
 venv/
 env/
 .env
 
-# ── Jupyter ────────────────────────────────────────────────────────────────────
+# Notebook and test caches
 .ipynb_checkpoints/
 *.ipynb
 .pytest_cache/
 2DPhaseChangePINNs/.pytest_cache/
+2DPhaseChangePINNs/.pytest_tmp/
 2DPhaseChangePINNs/pytest_tmp/
 2DPhaseChangePINNs/pytest-cache-files-*/
 
-# ── Model weights — GITIGNORED to prevent repo bloat ─────────────────────────
-# Naming convention: pinns_v{MAJOR}.{MINOR}_ep{EPOCH:05d}_loss{VAL:.4e}.pth
-# Example:          pinns_v1.0_ep05000_loss1.2345e-04.pth
-# Keep only the best checkpoint per version; log it in checkpoints/BEST_MODELS.md
-2DPhaseChangePINNs/checkpoints/*.pth
-2DPhaseChangePINNs/checkpoints/**/*.pth
-2DPhaseChangePINNs/checkpoints/.*.tmp-*
-2DPhaseChangePINNs/checkpoints/**/*.tmp*
-2DPhaseChangePINNs/checkpoints/**/.*.tmp*
-2DPhaseChangePINNs/checkpoints/*/
-2DPhaseChangePINNs/checkpoints/**/BEST_MODELS.md
-
-# ── Large outputs (figures / numpy dumps) ─────────────────────────────────────
+# Generated training artifacts
+2DPhaseChangePINNs/checkpoints/
 2DPhaseChangePINNs/outputs/
-2DPhaseChangePINNs/outputs/*.npy
-2DPhaseChangePINNs/outputs/*.npz
-2DPhaseChangePINNs/outputs/*.png
-2DPhaseChangePINNs/outputs/*.pdf
-2DPhaseChangePINNs/outputs/*.csv
-2DPhaseChangePINNs/outputs/*.json
-2DPhaseChangePINNs/outputs/**/*.npy
-2DPhaseChangePINNs/outputs/**/*.npz
-2DPhaseChangePINNs/outputs/**/*.png
-2DPhaseChangePINNs/outputs/**/*.pdf
-2DPhaseChangePINNs/outputs/**/*.csv
-2DPhaseChangePINNs/outputs/**/*.json
+# Legacy/default pull location from the local HPC helper; preferred location is
+# 2DPhaseChangePINNs/outputs/hpc_results/ once the helper is updated.
+hpc_results/
 
-# ── OS noise ──────────────────────────────────────────────────────────────────
+# Local helper scripts and machine-specific folders
+hpc_run.py
+hpc_run.py.*
+2DPhaseChangePINNs/run_pre_resample_windows.py
+2DPhaseChangePINNs/run_caseB_*.ps1
+2DPhaseChangePINNs/qwen3_tts_local/
+
+# OS and editor noise
 .DS_Store
 Thumbs.db
 desktop.ini
-
-# ── IDE ───────────────────────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
-
-# Local run artifacts and machine-specific helpers
-hpc_results/
-2DPhaseChangePINNs/hpc_results/
-2DPhaseChangePINNs/qwen3_tts_local/
-2DPhaseChangePINNs/run_caseB_fresh_2h.ps1
-2DPhaseChangePINNs/run_caseB_hotwall_6h.ps1
-2DPhaseChangePINNs/run_pre_resample_windows.py
-hpc_run.py
-hpc_run.py.*

@@ -25,9 +25,9 @@ torch.manual_seed(0)
 N_SMALL = 32
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# Fixtures
-# ─────────────────────────────────────────────────────────────────────────
+
+
+
 
 @pytest.fixture(scope="module")
 def model():
@@ -36,15 +36,15 @@ def model():
     return m
 
 
-def _pts(N=N_SMALL, r_val=None, x_val=None, t_val=None):
+def _pts(N=N_SMALL, r_val=None, x_val=None, tau_val=None):
     """Helper: make a point batch with requires_grad=True."""
     r = (torch.full((N,), r_val, dtype=torch.float32) if r_val is not None
          else torch.rand(N)).requires_grad_(True)
     x = (torch.full((N,), x_val, dtype=torch.float32) if x_val is not None
          else (torch.rand(N) * cfg.case.L)).requires_grad_(True)
-    t = (torch.full((N,), t_val, dtype=torch.float32) if t_val is not None
+    tau = (torch.full((N,), tau_val, dtype=torch.float32) if tau_val is not None
          else (torch.rand(N) * cfg.case.tau_end)).requires_grad_(True)
-    return {"r": r, "x": x, "t": t}
+    return {"r": r, "x": x, "tau": tau}
 
 
 def _full_batch():
@@ -55,22 +55,22 @@ def _full_batch():
         "inlet":     _pts(N_SMALL, x_val=0.0),
         "outlet":    _pts(N_SMALL, x_val=cfg.case.L),
         "axis":      _pts(N_SMALL, r_val=0.01),
-        "ic":        _pts(N_SMALL, t_val=0.0),
+        "ic":        _pts(N_SMALL, tau_val=0.0),
     }
 
 
 def _fwd_with_H(model, pts):
     """Forward pass + Heaviside, returns (out, r, x, tau)."""
-    r, x, t = pts["r"], pts["x"], pts["t"]
-    out = model(r, x, t)
+    r, x, tau = pts["r"], pts["x"], pts["tau"]
+    out = model(r, x, tau)
     out["H"] = model.smooth_heaviside(r, out["r_int"].detach(),
                                        cfg.network.interface_epsilon)
-    return out, r, x, t
+    return out, r, x, tau
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# 2.1  Derivative utility tests
-# ─────────────────────────────────────────────────────────────────────────
+
+
+
 
 def test_grad_linear():
     """_grad on f = 3r should return 3 everywhere."""
@@ -94,7 +94,7 @@ def test_laplacian_cyl_constant():
     r = (torch.rand(20) * 0.9 + 0.05).requires_grad_(True)
     x = torch.rand(20).requires_grad_(True)
     f = torch.ones_like(r) * 5.0
-    # f doesn't depend on r or x yet — need to make it part of graph
+
     f = f + 0.0 * r + 0.0 * x
     lap = _laplacian_cyl(f, r, x)
     torch.testing.assert_close(lap, torch.zeros_like(lap), atol=1e-5, rtol=0)
@@ -114,7 +114,7 @@ def test_poiseuille_mean_velocity():
     r_int = torch.tensor(0.8)
     r = torch.linspace(0.0, 0.8, 1000)
     u = _poiseuille(r, r_int.expand_as(r))
-    # Mean over circular cross-section: (2/R²) ∫₀ᴿ u(r)·r dr
+
     dr = r[1] - r[0]
     mean_u = 2.0 / (r_int ** 2) * (u * r * dr).sum()
     assert abs(mean_u.item() - 1.0) < 0.01, f"Poiseuille mean = {mean_u:.4f}, expected 1.0"
@@ -127,44 +127,44 @@ def test_poiseuille_zero_at_wall():
     torch.testing.assert_close(u_wall, torch.zeros_like(u_wall), atol=1e-6, rtol=0)
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# 2.2  Interior residuals — shape and NaN checks
-# ─────────────────────────────────────────────────────────────────────────
+
+
+
 
 def test_res_mass_shape_no_nan(model):
-    out, r, x, t = _fwd_with_H(model, _pts())
-    R = res_mass(out, r, x, t)
+    out, r, x, tau = _fwd_with_H(model, _pts())
+    R = res_mass(out, r, x, tau)
     assert R.shape == (N_SMALL,)
     assert not torch.isnan(R).any(), "NaN in res_mass"
     assert not torch.isinf(R).any(), "Inf in res_mass"
 
 
 def test_res_mom_x_shape_no_nan(model):
-    out, r, x, t = _fwd_with_H(model, _pts())
-    R = res_mom_x(out, r, x, t, cfg.case)
+    out, r, x, tau = _fwd_with_H(model, _pts())
+    R = res_mom_x(out, r, x, tau, cfg.case)
     assert R.shape == (N_SMALL,)
     assert not torch.isnan(R).any()
 
 
 def test_res_mom_r_shape_no_nan(model):
     pts = _pts()
-    pts["r"] = (torch.rand(N_SMALL) * 0.8 + 0.05).requires_grad_(True)  # away from 0
-    out, r, x, t = _fwd_with_H(model, pts)
-    R = res_mom_r(out, r, x, t, cfg.case)
+    pts["r"] = (torch.rand(N_SMALL) * 0.8 + 0.05).requires_grad_(True)
+    out, r, x, tau = _fwd_with_H(model, pts)
+    R = res_mom_r(out, r, x, tau, cfg.case)
     assert R.shape == (N_SMALL,)
     assert not torch.isnan(R).any()
 
 
 def test_res_energy_fluid_shape_no_nan(model):
-    out, r, x, t = _fwd_with_H(model, _pts())
-    R = res_energy_fluid(out, r, x, t, cfg.case)
+    out, r, x, tau = _fwd_with_H(model, _pts())
+    R = res_energy_fluid(out, r, x, tau, cfg.case)
     assert R.shape == (N_SMALL,)
     assert not torch.isnan(R).any()
 
 
 def test_res_energy_dep_shape_no_nan(model):
-    out, r, x, t = _fwd_with_H(model, _pts())
-    R = res_energy_dep(out, r, x, t, cfg.case)
+    out, r, x, tau = _fwd_with_H(model, _pts())
+    R = res_energy_dep(out, r, x, tau, cfg.case)
     assert R.shape == (N_SMALL,)
     assert not torch.isnan(R).any()
 
@@ -172,12 +172,12 @@ def test_res_energy_dep_shape_no_nan(model):
 def _analytic_points():
     r = torch.linspace(0.2, 0.8, N_SMALL).requires_grad_(True)
     x = torch.linspace(0.1, 0.9, N_SMALL).requires_grad_(True)
-    t = torch.linspace(0.05, 0.75, N_SMALL).requires_grad_(True)
-    return r, x, t
+    tau = torch.linspace(0.05, 0.75, N_SMALL).requires_grad_(True)
+    return r, x, tau
 
 
-def _quadratic_field(r, x, t):
-    return 3.0 * t + 5.0 * r + 7.0 * x + 11.0 * r ** 2 + 13.0 * x ** 2
+def _quadratic_field(r, x, tau):
+    return 3.0 * tau + 5.0 * r + 7.0 * x + 11.0 * r ** 2 + 13.0 * x ** 2
 
 
 def _quadratic_laplacian(r):
@@ -185,8 +185,8 @@ def _quadratic_laplacian(r):
 
 
 def test_momentum_coefficients_use_excel_nondim():
-    r, x, t = _analytic_points()
-    u_x = _quadratic_field(r, x, t)
+    r, x, tau = _analytic_points()
+    u_x = _quadratic_field(r, x, tau)
     u_r = 0.25 + 2.0 * r + 3.0 * x
     p = 17.0 * x + 19.0 * r
     out = {
@@ -196,7 +196,7 @@ def test_momentum_coefficients_use_excel_nondim():
         "H": torch.zeros_like(r),
     }
 
-    R = res_mom_x(out, r, x, t, cfg.case)
+    R = res_mom_x(out, r, x, tau, cfg.case)
     expected = (
         (1.0 / cfg.case.L) * 3.0
         + u_r * (5.0 + 22.0 * r)
@@ -208,8 +208,8 @@ def test_momentum_coefficients_use_excel_nondim():
 
 
 def test_radial_momentum_coefficients_use_excel_nondim():
-    r, x, t = _analytic_points()
-    u_r = _quadratic_field(r, x, t)
+    r, x, tau = _analytic_points()
+    u_r = _quadratic_field(r, x, tau)
     u_x = 0.25 + 2.0 * r + 3.0 * x
     p = 17.0 * r + 19.0 * x
     out = {
@@ -219,7 +219,7 @@ def test_radial_momentum_coefficients_use_excel_nondim():
         "H": torch.zeros_like(r),
     }
 
-    R = res_mom_r(out, r, x, t, cfg.case)
+    R = res_mom_r(out, r, x, tau, cfg.case)
     expected = (
         (1.0 / cfg.case.L) * 3.0
         + u_r * (5.0 + 22.0 * r)
@@ -231,8 +231,8 @@ def test_radial_momentum_coefficients_use_excel_nondim():
 
 
 def test_energy_coefficients_use_excel_nondim():
-    r, x, t = _analytic_points()
-    theta = _quadratic_field(r, x, t)
+    r, x, tau = _analytic_points()
+    theta = _quadratic_field(r, x, tau)
     u_r = 0.25 + 2.0 * r
     u_x = 0.5 + 3.0 * x
     out = {
@@ -243,7 +243,7 @@ def test_energy_coefficients_use_excel_nondim():
         "H": torch.zeros_like(r),
     }
 
-    R = res_energy_fluid(out, r, x, t, cfg.case)
+    R = res_energy_fluid(out, r, x, tau, cfg.case)
     expected = (
         (1.0 / cfg.case.L) * 3.0
         + u_r * (5.0 + 22.0 * r)
@@ -254,14 +254,14 @@ def test_energy_coefficients_use_excel_nondim():
 
 
 def test_deposit_energy_coefficients_use_excel_nondim():
-    r, x, t = _analytic_points()
-    theta = _quadratic_field(r, x, t)
+    r, x, tau = _analytic_points()
+    theta = _quadratic_field(r, x, tau)
     out = {
         "Theta_dep": theta,
         "H": torch.ones_like(r),
     }
 
-    R = res_energy_dep(out, r, x, t, cfg.case)
+    R = res_energy_dep(out, r, x, tau, cfg.case)
     expected = (
         (1.0 / cfg.case.L) * 3.0
         - (2.0 * cfg.case.k_ratio / cfg.case.Pe_D) * _quadratic_laplacian(r)
@@ -270,72 +270,72 @@ def test_deposit_energy_coefficients_use_excel_nondim():
 
 
 def test_stefan_coefficient_uses_excel_nondim():
-    r, x, t = _analytic_points()
+    r, x, tau = _analytic_points()
     out = {
-        "r_int": 0.8 + 3.0 * t + 5.0 * x,
-        "Theta_f": 2.0 * r + 0.0 * x + 0.0 * t,
-        "Theta_dep": 7.0 * r + 0.0 * x + 0.0 * t,
+        "r_int": 0.8 + 3.0 * tau + 5.0 * x,
+        "Theta_f": 2.0 * r + 0.0 * x + 0.0 * tau,
+        "Theta_dep": 7.0 * r + 0.0 * x + 0.0 * tau,
     }
 
-    R = res_stefan(out, r, x, t, cfg.case)
+    R = res_stefan(out, r, x, tau, cfg.case)
     expected = 3.0 - (2.0 * cfg.case.L / cfg.case.Pe_D) * cfg.case.Ste * (
         cfg.case.k_ratio * 7.0 - 2.0
     )
     torch.testing.assert_close(R, torch.full_like(r, expected), atol=1e-6, rtol=1e-6)
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# 2.2  Heaviside weighting: fluid residuals zero in deposit, and vice versa
-# ─────────────────────────────────────────────────────────────────────────
+
+
+
 
 def test_fluid_residual_zero_deep_in_deposit(model):
     """res_mass weighted by (1-H) should be ≈ 0 when r >> r_int (H ≈ 1)."""
-    # Place points well outside interface (r = r_w, interface will be < r_w)
+
     pts = _pts(N_SMALL, r_val=cfg.case.r_w)
-    out, r, x, t = _fwd_with_H(model, pts)
-    # Force H = 1 everywhere to simulate "all deposit" region
+    out, r, x, tau = _fwd_with_H(model, pts)
+
     out["H"] = torch.ones(N_SMALL)
-    R = res_mass(out, r, x, t)
+    R = res_mass(out, r, x, tau)
     torch.testing.assert_close(R, torch.zeros_like(R), atol=1e-6, rtol=0)
 
 
 def test_deposit_residual_zero_deep_in_fluid(model):
     """res_energy_dep weighted by H should be ≈ 0 when r << r_int (H ≈ 0)."""
     pts = _pts(N_SMALL)
-    out, r, x, t = _fwd_with_H(model, pts)
+    out, r, x, tau = _fwd_with_H(model, pts)
     out["H"] = torch.zeros(N_SMALL)
-    R = res_energy_dep(out, r, x, t, cfg.case)
+    R = res_energy_dep(out, r, x, tau, cfg.case)
     torch.testing.assert_close(R, torch.zeros_like(R), atol=1e-6, rtol=0)
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# 2.3  Interface residuals
-# ─────────────────────────────────────────────────────────────────────────
+
+
+
 
 def test_stefan_shape_no_nan(model):
-    out, r, x, t = _fwd_with_H(model, _pts())
-    R = res_stefan(out, r, x, t, cfg.case)
+    out, r, x, tau = _fwd_with_H(model, _pts())
+    R = res_stefan(out, r, x, tau, cfg.case)
     assert R.shape == (N_SMALL,)
     assert not torch.isnan(R).any()
 
 
 def test_T_continuity_shape_no_nan(model):
-    out, r, x, t = _fwd_with_H(model, _pts())
+    out, r, x, tau = _fwd_with_H(model, _pts())
     R7a, R7b = res_T_continuity(out, cfg.case)
     assert R7a.shape == (N_SMALL,) and R7b.shape == (N_SMALL,)
     assert not torch.isnan(R7a).any() and not torch.isnan(R7b).any()
 
 
 def test_interface_velocity_bc_shape_no_nan(model):
-    out, r, x, t = _fwd_with_H(model, _pts())
+    out, r, x, tau = _fwd_with_H(model, _pts())
     R_ux, R_ur = res_interface_velocity_bc(out)
     assert R_ux.shape == (N_SMALL,) and R_ur.shape == (N_SMALL,)
     assert not torch.isnan(R_ux).any() and not torch.isnan(R_ur).any()
 
 
 def test_rint_regularizers_shape_no_nan(model):
-    out, r, x, t = _fwd_with_H(model, _pts())
-    R_mono = res_rint_monotonic(out, t)
+    out, r, x, tau = _fwd_with_H(model, _pts())
+    R_mono = res_rint_monotonic(out, tau)
     R_x_mono = res_rint_x_monotonic(out, x)
     assert R_mono.shape == (N_SMALL,)
     assert R_x_mono.shape == (N_SMALL,)
@@ -343,14 +343,14 @@ def test_rint_regularizers_shape_no_nan(model):
     assert not torch.isnan(R_x_mono).any()
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# 2.4  BC / IC residuals
-# ─────────────────────────────────────────────────────────────────────────
+
+
+
 
 def test_wall_bc_Theta_dep_at_cold_wall(model):
     """If network predicts cold-wall temperature downstream, R_wall_T should be 0."""
     pts = _pts(N_SMALL, r_val=cfg.case.r_w, x_val=cfg.case.hot_wall_length + 1.0)
-    out, r, x, t = _fwd_with_H(model, pts)
+    out, r, x, tau = _fwd_with_H(model, pts)
     out["Theta_dep"] = torch.full((N_SMALL,), cfg.case.Theta_wall)
     R_T, _, _ = res_wall_bc(out, x, cfg.case)
     torch.testing.assert_close(R_T, torch.zeros_like(R_T), atol=1e-6, rtol=0)
@@ -359,7 +359,7 @@ def test_wall_bc_Theta_dep_at_cold_wall(model):
 def test_wall_bc_Theta_dep_at_hot_upstream_wall(model):
     """If network predicts inlet temperature on the hot upstream wall, R_wall_T should be 0."""
     pts = _pts(N_SMALL, r_val=cfg.case.r_w, x_val=0.5 * cfg.case.hot_wall_length)
-    out, r, x, t = _fwd_with_H(model, pts)
+    out, r, x, tau = _fwd_with_H(model, pts)
     out["Theta_dep"] = torch.full((N_SMALL,), cfg.case.Theta_in)
     R_T, _, _ = res_wall_bc(out, x, cfg.case)
     torch.testing.assert_close(R_T, torch.zeros_like(R_T), atol=1e-6, rtol=0)
@@ -367,7 +367,7 @@ def test_wall_bc_Theta_dep_at_hot_upstream_wall(model):
 
 def test_inlet_bc_T_residual(model):
     pts = _pts(N_SMALL, x_val=0.0)
-    out, r, x, t = _fwd_with_H(model, pts)
+    out, r, x, tau = _fwd_with_H(model, pts)
     R_T, _, _ = res_inlet_bc(out, r, cfg.case)
     assert R_T.shape == (N_SMALL,)
     assert not torch.isnan(R_T).any()
@@ -375,7 +375,7 @@ def test_inlet_bc_T_residual(model):
 
 def test_outlet_bc_shape_no_nan(model):
     pts = _pts(N_SMALL, x_val=cfg.case.L)
-    out, r, x, t = _fwd_with_H(model, pts)
+    out, r, x, tau = _fwd_with_H(model, pts)
     dTf, dux = res_outlet_bc(out, x)
     assert dTf.shape == (N_SMALL,) and dux.shape == (N_SMALL,)
     assert not torch.isnan(dTf).any()
@@ -383,7 +383,7 @@ def test_outlet_bc_shape_no_nan(model):
 
 def test_axis_bc_shape_no_nan(model):
     pts = _pts(N_SMALL, r_val=0.01)
-    out, r, x, t = _fwd_with_H(model, pts)
+    out, r, x, tau = _fwd_with_H(model, pts)
     R_ur, R_Tf, R_ux = res_axis_bc(out, r)
     assert R_ur.shape == (N_SMALL,)
     assert not torch.isnan(R_ur).any()
@@ -391,17 +391,17 @@ def test_axis_bc_shape_no_nan(model):
 
 def test_ic_rint_residual(model):
     """At tau=0 the r_int residual should be r_int_predicted - r_w."""
-    pts = _pts(N_SMALL, t_val=0.0)
-    out, r, x, t = _fwd_with_H(model, pts)
-    # Manually set r_int to r_w to check residual = 0
+    pts = _pts(N_SMALL, tau_val=0.0)
+    out, r, x, tau = _fwd_with_H(model, pts)
+
     out["r_int"] = torch.full((N_SMALL,), cfg.case.r_int_ic)
     R_rint, _, _, _ = res_ic(out, r, cfg.case)
     torch.testing.assert_close(R_rint, torch.zeros_like(R_rint), atol=1e-6, rtol=0)
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# 2.5  compute_all_residuals
-# ─────────────────────────────────────────────────────────────────────────
+
+
+
 
 def test_compute_all_residuals_keys(model):
     """All expected residual keys are present in the output dict."""
@@ -417,7 +417,7 @@ def test_compute_all_residuals_keys(model):
         "ic_rint", "ic_Tf", "ic_ux", "ic_ur",
     }
     res = compute_all_residuals(model, _full_batch(), cfg)
-    assert expected == set(res.keys()), \
+    assert expected == set(res.keys()),\
         f"Missing keys: {expected - set(res.keys())}"
 
 
